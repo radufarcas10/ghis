@@ -102,6 +102,20 @@ class WebsiteTests(unittest.TestCase):
                 self.assertTrue((SITE / icon["src"]).exists(), icon["src"])
         self.assertIn('content="noindex"', (SITE / "404.html").read_text())
 
+    def test_inline_icons_are_text_sized_without_css(self) -> None:
+        # An SVG without its own size fills its container whenever its CSS is missing or stale
+        # (a cached old stylesheet right after a deploy): one huge icon across the page.
+        pages = [
+            SITE / "index.html",
+            SITE / "404.html",
+            ROOT / "src" / "ghis" / "web" / "index.html",
+            ROOT / "src" / "ghis" / "web" / "connect.html",
+            ROOT / "src" / "ghis" / "web" / "connect.js",
+        ]
+        for page in pages:
+            for svg in re.findall(r"<svg\b[^>]*>", page.read_text()):
+                self.assertIn("width=", svg, f"{page.name}: {svg[:60]}")
+
     def test_stories_stay_out_of_search_results(self) -> None:
         story = (ROOT / "src" / "ghis" / "web" / "index.html").read_text()
         self.assertIn('<meta name="robots" content="noindex, nofollow">', story)

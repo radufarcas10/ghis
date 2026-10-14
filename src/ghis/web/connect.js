@@ -9,10 +9,10 @@
 	}[c]));
 
 	const ICONS = {
-		github: '<svg viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="12" fill="currentColor"/><path d="m10 9-4 4 4 4m6-8 4 4-4 4" fill="none" stroke="var(--surface)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-		gitlab: '<svg viewBox="0 0 26 26" aria-hidden="true"><path d="M13 23 2.6 15.2 5.4 4.4l3 8.2h9.2l3-8.2 2.8 10.8Z" fill="currentColor"/></svg>',
-		gitea: '<svg viewBox="0 0 26 26" aria-hidden="true"><rect x="2" y="2" width="22" height="22" rx="6" fill="currentColor"/><path d="M9 19V10a3 3 0 0 1 3-3h5M9 13.5h5" fill="none" stroke="var(--surface)" stroke-width="2" stroke-linecap="round"/></svg>',
-		git: '<svg viewBox="0 0 26 26" aria-hidden="true"><rect x="3.5" y="3.5" width="19" height="19" rx="3" transform="rotate(45 13 13)" fill="currentColor"/><g fill="none" stroke="var(--surface)" stroke-width="1.8" stroke-linecap="round"><path d="M10 9.5 13 12.5v5M13 12.5l3-1.5"/></g><circle cx="13" cy="18" r="1.6" fill="var(--surface)"/><circle cx="16.4" cy="10.8" r="1.6" fill="var(--surface)"/></svg>',
+		github: '<svg width="1em" height="1em" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="12" fill="currentColor"/><path d="m10 9-4 4 4 4m6-8 4 4-4 4" fill="none" stroke="var(--surface)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+		gitlab: '<svg width="1em" height="1em" viewBox="0 0 26 26" aria-hidden="true"><path d="M13 23 2.6 15.2 5.4 4.4l3 8.2h9.2l3-8.2 2.8 10.8Z" fill="currentColor"/></svg>',
+		gitea: '<svg width="1em" height="1em" viewBox="0 0 26 26" aria-hidden="true"><rect x="2" y="2" width="22" height="22" rx="6" fill="currentColor"/><path d="M9 19V10a3 3 0 0 1 3-3h5M9 13.5h5" fill="none" stroke="var(--surface)" stroke-width="2" stroke-linecap="round"/></svg>',
+		git: '<svg width="1em" height="1em" viewBox="0 0 26 26" aria-hidden="true"><rect x="3.5" y="3.5" width="19" height="19" rx="3" transform="rotate(45 13 13)" fill="currentColor"/><g fill="none" stroke="var(--surface)" stroke-width="1.8" stroke-linecap="round"><path d="M10 9.5 13 12.5v5M13 12.5l3-1.5"/></g><circle cx="13" cy="18" r="1.6" fill="var(--surface)"/><circle cx="16.4" cy="10.8" r="1.6" fill="var(--surface)"/></svg>',
 	};
 	const SHORT = { github: 'GitHub', gitlab: 'GitLab', gitea: 'Codeberg', git: 'Any git' };
 	const SUB = { github: 'and Enterprise', gitlab: 'and self-managed', gitea: 'Forgejo · Gitea', git: 'Bitbucket, sr.ht…' };

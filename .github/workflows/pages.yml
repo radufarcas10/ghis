@@ -35,6 +35,8 @@ jobs:
           # Canonical URLs, link previews and the sitemap name the main site; a fork (or a
           # custom domain) gets its own published address instead.
           sed -i "s#https://radufarcas10.github.io/ghis/#${BASE_URL%/}/#g" _site/*.html _site/sitemap.xml
+          # A new version tag per deploy, so no browser pairs new HTML with a cached old stylesheet.
+          sed -i -E "s#(site\.css|site\.js|theme\.js)\"#\1?v=${GITHUB_SHA::8}\"#g" _site/*.html
           cp src/ghis/web/theme.js src/ghis/web/favicon.svg _site/
           # One live demo per provider vocabulary, each at its own route.
           python ghis.py demo --provider github --out _site/demo
