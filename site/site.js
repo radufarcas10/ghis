@@ -3,19 +3,16 @@
 (() => {
 	'use strict';
 
-	// On GitHub Pages the address is <owner>.github.io/<repo>/, which names the repository,
-	// so the links need no editing after a fork or a rename.
+	// Links in the HTML point at the main repository. A fork published on its own
+	// <owner>.github.io/<repo>/ points them at itself instead, with no editing.
 	const pages = location.hostname.match(/^([\w-]+)\.github\.io$/i);
 	const repoName = pages && location.pathname.split('/').filter(Boolean)[0];
-	const repo = pages ? `https://github.com/${pages[1]}/${repoName || `${pages[1]}.github.io`}` : null;
-
-	if (repo) {
+	if (pages && !(pages[1].toLowerCase() === 'radufarcas10' && repoName === 'ghis')) {
+		const repo = `https://github.com/${pages[1]}/${repoName || `${pages[1]}.github.io`}`;
 		for (const a of document.querySelectorAll('[data-repo-link]')) a.href = repo;
 		for (const a of document.querySelectorAll('[data-repo-file]')) a.href = `${repo}/blob/main/${a.dataset.repoFile}`;
 		for (const el of document.querySelectorAll('[data-repo-clone]')) el.textContent = `${repo}.git`;
 		for (const el of document.querySelectorAll('[data-repo-pip]')) el.textContent = `git+${repo}`;
-	} else {
-		for (const a of document.querySelectorAll('[data-repo-link], [data-repo-file]')) a.removeAttribute('href');
 	}
 
 	for (const button of document.querySelectorAll('[data-copy]')) {

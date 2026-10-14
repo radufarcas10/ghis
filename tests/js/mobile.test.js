@@ -5,7 +5,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn, execFileSync, spawnSync } = require('node:child_process');
-const { mkdtempSync, rmSync } = require('node:fs');
+const { mkdtempSync, rmSync, readFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -22,28 +22,51 @@ const skip = !CHROME ? 'no Chrome or Chromium found'
 const PHONE = { width: 393, height: 852, deviceScaleFactor: 2, mobile: true }; // iPhone 16
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Waits on real signals rather than fixed sleeps, so a slow CI machine is only slower.
 async function openChrome() {
-	const port = 9400 + Math.floor(Math.random() * 400);
 	const profile = mkdtempSync(path.join(tmpdir(), 'ghis-chrome-'));
-	const proc = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${port}`, '--no-first-run',
-		'--no-sandbox', '--disable-gpu', `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
+	// Port 0: Chrome picks a free port and writes it to DevToolsActivePort, so no collisions.
+	const proc = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0', '--no-first-run',
+		'--no-default-browser-check', '--no-sandbox', '--disable-gpu', `--user-data-dir=${profile}`,
+		'about:blank'], { stdio: 'ignore' });
+	let port;
+	for (let i = 0; i < 300 && !port; i++) {
+		try { port = readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0]; } catch { await sleep(100); }
+	}
+	assert.ok(port, 'Chrome did not start within 30 s');
 	let page;
 	for (let i = 0; i < 100 && !page; i++) {
 		try {
-			page = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page');
-		} catch { await sleep(100); }
+			page = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === 'page');
+		} catch { /* not listening yet */ }
+		if (!page) await sleep(100);
 	}
+	assert.ok(page, 'Chrome has no page to drive');
+
 	const ws = new WebSocket(page.webSocketDebuggerUrl);
-	await new Promise((resolve) => ws.addEventListener('open', resolve));
+	await new Promise((resolve, reject) => { ws.addEventListener('open', resolve); ws.addEventListener('error', reject); });
 	let id = 0;
-	const waiting = new Map();
+	const replies = new Map();
+	const listeners = new Map();
 	ws.addEventListener('message', (event) => {
 		const message = JSON.parse(event.data);
-		if (waiting.has(message.id)) { waiting.get(message.id)(message.result); waiting.delete(message.id); }
+		if (message.id && replies.has(message.id)) {
+			const { resolve, reject } = replies.get(message.id);
+			replies.delete(message.id);
+			if (message.error) reject(new Error(`${message.error.message} (${message.error.code})`));
+			else resolve(message.result);
+		} else if (message.method && listeners.has(message.method)) {
+			listeners.get(message.method)();
+			listeners.delete(message.method);
+		}
 	});
-	const send = (method, params = {}) => new Promise((resolve) => {
-		waiting.set(++id, resolve);
+	const send = (method, params = {}) => new Promise((resolve, reject) => {
+		replies.set(++id, { resolve, reject });
 		ws.send(JSON.stringify({ id, method, params }));
+	});
+	const next = (event, ms) => new Promise((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(`no ${event} within ${ms} ms`)), ms);
+		listeners.set(event, () => { clearTimeout(timer); resolve(); });
 	});
 	const close = async () => {
 		ws.close();
@@ -52,7 +75,8 @@ async function openChrome() {
 		await exited; // Chrome writes to its profile until it is gone
 		rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 	};
-	return { send, close };
+	await send('Page.enable');
+	return { send, next, close };
 }
 
 // The page's width against the phone's, and which elements stick out. (A wide ::before or
@@ -65,8 +89,10 @@ const MEASURE = `(() => {
 		.map((el) => el.tagName.toLowerCase() + (typeof el.className === 'string' && el.className ? '.' + el.className : ''));
 	return { page: document.documentElement.scrollWidth, phone: vw, culprits: culprits.slice(0, 5) };
 })()`;
+// Fonts loaded and two frames painted: the layout the visitor actually sees.
+const SETTLED = 'document.fonts.ready.then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))';
 
-test('every page fits a phone without zooming out', { skip, timeout: 120000 }, async (t) => {
+test('every page fits a phone without zooming out', { skip, timeout: 180000 }, async (t) => {
 	const out = mkdtempSync(path.join(tmpdir(), 'ghis-mobile-'));
 	t.after(() => rmSync(out, { recursive: true, force: true }));
 	execFileSync(PYTHON, [path.join(ROOT, 'ghis.py'), 'demo', '--provider', 'gitlab', '--out', out], { stdio: 'ignore' });
@@ -82,8 +108,10 @@ test('every page fits a phone without zooming out', { skip, timeout: 120000 }, a
 	await chrome.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
 
 	for (const [name, url] of Object.entries(pages)) {
+		const loaded = chrome.next('Page.loadEventFired', 30000);
 		await chrome.send('Page.navigate', { url });
-		await sleep(2500);
+		await loaded;
+		await chrome.send('Runtime.evaluate', { expression: SETTLED, awaitPromise: true });
 		const { result } = await chrome.send('Runtime.evaluate', { expression: MEASURE, returnByValue: true });
 		const { page, phone, culprits } = result.value;
 		assert.ok(page <= phone, `${name} is ${page}px wide on a ${phone}px phone; sticking out: ${culprits.join(', ') || 'a pseudo-element'}`);

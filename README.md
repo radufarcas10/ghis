@@ -1,6 +1,6 @@
 # ghis
 
-**Your git history, told beautifully.** ghis reads your commits, pull/merge requests and
+**Your git history, told beautifully.** · [Website and live demo](https://radufarcas10.github.io/ghis/) ghis reads your commits, pull/merge requests and
 reviews from GitHub, GitLab, Codeberg or any git host, and turns them into an animated
 story page: a day-by-day calendar, your coding rhythm, where your time went, languages,
 collaboration stats and highlights.
@@ -18,7 +18,7 @@ collaboration stats and highlights.
 You need **Python 3.9+** and **git 2.31+**. Check with `python3 --version` and `git --version`.
 
 ```bash
-git clone https://github.com/<you>/ghis.git
+git clone https://github.com/radufarcas10/ghis.git
 cd ghis
 python3 ghis.py
 ```
@@ -46,7 +46,7 @@ with the right scopes already ticked.
 Just want to look first? `python3 ghis.py demo --open` shows a story built from sample data,
 and the project website has live demos.
 
-**Prefer a command?** `pipx install git+https://github.com/<owner>/ghis` gives you `ghis`,
+**Prefer a command?** `pipx install git+https://github.com/radufarcas10/ghis` gives you `ghis`,
 which works the same as `python3 ghis.py` (stories and clones then live in `~/.ghis`).
 
 Press `Ctrl+C` in the terminal to stop ghis.
