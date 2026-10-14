@@ -143,8 +143,8 @@ emails you used, then add the missing ones.
 under *notes about this data* at the bottom. On the command line, try `--clone-via https`.
 If the repository is checked out locally, point `--local-root` (or the folders field) at it.
 
-**GitHub organisation repositories are missing.** If the organisation uses SAML SSO,
-authorise the token for it: *Settings → Developer settings → Tokens → Configure SSO*.
+**GitHub organization repositories are missing.** If the organization uses SAML SSO,
+authorize the token for it: *Settings → Developer settings → Tokens → Configure SSO*.
 
 **The calendar starts later than my first commit.** GitLab deletes old activity events.
 Commits themselves are unaffected.

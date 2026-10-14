@@ -94,7 +94,7 @@ so nothing needs editing after a fork or rename.
    `httpUrl`), `requests`, `reviews`, `activity` (`{day: {action: count}}`, using the action
    names in `actionLabels()` in `web/lib.js`), `has` and `cloneUser`.
 2. Register it in `providers/__init__.py` (`PROVIDERS` and `COLLECTORS`). Teach
-   `detect.py` how to recognise its hosts and tokens.
+   `detect.py` how to recognize its hosts and tokens.
 3. In `web/connect.js`, add its icon, short label, token link (`TOKEN_HELP`) and
    step-by-step help (`TOKEN_STEPS`).
 4. Add a replayed-API test to `tests/test_providers.py`, and a row to the provider table
@@ -107,8 +107,8 @@ so nothing needs editing after a fork or rename.
 - JavaScript and CSS: tabs. Escape every value from data with `esc()` before it reaches
   HTML, and pass every link from data through `safeUrl()`. Logic that doesn't need the DOM
   belongs in `lib.js`, with a test.
-- Charts: keep the categorical colour order in `style.css`, which was checked for
-  colour-blind readers in both themes. Every chart needs a hover tooltip and a
+- Charts: keep the categorical color order in `style.css`, which was checked for
+  color-blind readers in both themes. Every chart needs a hover tooltip and a
   "View as table" fallback.
 - Anything that reaches the network or the filesystem from the server must respect hosted
   mode: read [SECURITY.md](SECURITY.md) before touching `server.py`, `collect.py` or
@@ -116,5 +116,5 @@ so nothing needs editing after a fork or rename.
 
 ## Pull requests
 
-Keep them focused. Add a test for behaviour changes. For UI changes, include a screenshot
+Keep them focused. Add a test for behavior changes. For UI changes, include a screenshot
 in light and dark.

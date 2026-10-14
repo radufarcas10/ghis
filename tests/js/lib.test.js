@@ -93,7 +93,7 @@ test('compute: streaks, busiest day, repositories and languages', () => {
 	assert.equal(s.mergesPct, 20);
 	assert.equal(s.nightPct, 20); // 23:30 in the author's own timezone
 	assert.equal(model.compute('all').cs.length, 6);
-	// Colours go by all-time lines changed: Vue (600) before Python (6 × 12).
+	// Colors go by all-time lines changed: Vue (600) before Python (6 × 12).
 	assert.equal(model.langColors.get('Vue'), 'var(--s1)');
 	assert.equal(model.langColors.get('Python'), 'var(--s2)');
 });

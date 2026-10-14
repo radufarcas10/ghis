@@ -98,7 +98,7 @@
 		const activity = data.activity || {};
 		const generatedDay = (data.generatedAt || new Date().toISOString()).slice(0, 10);
 
-		// A language keeps its colour whatever year is shown: slots go by all-time rank.
+		// A language keeps its color whatever year is shown: slots go by all-time rank.
 		const totals = {};
 		for (const c of commits) for (const [lang, n] of Object.entries(c.l || {})) totals[lang] = (totals[lang] || 0) + n;
 		const ranked = Object.entries(totals).filter(([l]) => l !== 'Other').sort((a, b) => b[1] - a[1]);
@@ -218,7 +218,7 @@
 		if (s.nightPct >= 20) return ['🦉', 'Night owl', `${s.nightPct}% of your commits land between 22:00 and 05:00.`];
 		if (s.morningPct >= 25) return ['🌅', 'Early bird', `${s.morningPct}% of your commits land before 09:00.`];
 		if (s.weekendPct >= 20) return ['🏕️', 'Weekend warrior', `${s.weekendPct}% of your commits happen on Saturday or Sunday.`];
-		if (peak >= 9 && peak <= 17) return ['☕', 'Office-hours coder', `You keep it civilised — your peak hour is ${hourLabel(peak)}.`];
+		if (peak >= 9 && peak <= 17) return ['☕', 'Office-hours coder', `You keep it civilized — your peak hour is ${hourLabel(peak)}.`];
 		return ['🌙', 'Evening coder', `Your peak hour is ${hourLabel(peak)}.`];
 	}
 

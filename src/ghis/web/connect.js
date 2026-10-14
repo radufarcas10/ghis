@@ -41,7 +41,7 @@
 			`Open <a href="${link}" target="_blank" rel="noopener noreferrer">your token settings ↗</a>. The scopes are already ticked.`,
 			'Name it "ghis" and pick a short expiry, 7 days is plenty.',
 			'Keep <b>repo</b>, <b>read:user</b> and <b>user:email</b> ticked, then <b>Generate token</b>.',
-			'Copy the token and paste it above. If your organisation uses SSO, choose <b>Configure SSO → Authorize</b> next to the token first.',
+			'Copy the token and paste it above. If your organization uses SSO, choose <b>Configure SSO → Authorize</b> next to the token first.',
 		],
 		gitlab: (link) => [
 			`Open <a href="${link}" target="_blank" rel="noopener noreferrer">your access tokens ↗</a>. The scopes are already ticked.`,

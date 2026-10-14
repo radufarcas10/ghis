@@ -1,6 +1,6 @@
 // Applies the saved theme before first paint; any [data-theme-toggle] flips and remembers it.
 // The switch is a soft crossfade: a View Transition where the browser has them (timed in
-// CSS), a colour transition elsewhere, and instant for reduced-motion users.
+// CSS), a color transition elsewhere, and instant for reduced-motion users.
 (() => {
 	const root = document.documentElement;
 	try {

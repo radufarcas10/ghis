@@ -111,8 +111,6 @@ code { font: 0.88em var(--mono); background: var(--surface-2); padding: 0.12em 0
 .icon-btn:hover { transform: rotate(-15deg); color: var(--ink); }
 .icon-btn svg { width: 18px; height: 18px; }
 .icon-btn.github svg { width: 20px; height: 20px; }
-.foot-gh { display: inline-flex; align-items: center; gap: 6px; }
-.foot-gh svg { width: 16px; height: 16px; }
 
 /* ------------------------------------------------------------------ hero */
 
@@ -235,8 +233,21 @@ main { max-width: 1160px; margin: 0 auto; padding: 0 16px; }
 .final { text-align: center; padding-bottom: 40px; }
 .final .sub { margin-inline: auto; }
 
-.foot { margin-top: 80px; padding: 32px 16px 48px; text-align: center; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; }
+.foot { margin-top: 80px; padding: 28px 16px 40px; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; }
+.foot-inner { max-width: 1160px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .foot p { margin: 4px 0; }
+
+/* The radufarcas.dev monogram as a mask: its shape, the theme's text color, so it reads
+   on both the light and the dark page. */
+.maker { display: inline-flex; align-items: center; gap: 10px; flex: none; color: var(--muted); text-decoration: none; font-weight: 600; transition: color 0.25s; }
+.maker:hover { color: var(--ink); }
+.maker-logo {
+	width: 32px; height: 32px; background: currentColor;
+	-webkit-mask: url(fr.png) center / contain no-repeat;
+	mask: url(fr.png) center / contain no-repeat;
+	transition: transform 0.4s var(--ease);
+}
+.maker:hover .maker-logo { transform: rotate(-20deg); }
 
 /* ------------------------------------------------------------------ 404 */
 
@@ -311,6 +322,7 @@ main { max-width: 1160px; margin: 0 auto; padding: 0 16px; }
 	.faq details { padding: 2px 18px; }
 	.faq summary { font-size: 16px; padding: 14px 0; }
 	.foot { margin-top: 56px; }
+	.foot-inner { flex-direction: column; text-align: center; }
 }
 
 @media (prefers-reduced-motion: reduce) {

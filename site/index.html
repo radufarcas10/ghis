@@ -67,7 +67,8 @@
 			"screenshot": "https://radufarcas10.github.io/ghis/og.png",
 			"author": {
 				"@type": "Person",
-				"name": "Radu Farcas"
+				"name": "Radu Farcas",
+				"url": "https://radufarcas.dev"
 			},
 			"sameAs": [
 				"https://github.com/radufarcas10/ghis"
@@ -102,7 +103,7 @@
 					"name": "Do I need a token?",
 					"acceptedAnswer": {
 						"@type": "Answer",
-						"text": "No. Without one, ghis reads the repositories already on your computer. With a token it also includes pull or merge requests, reviews, comments, and repositories you never cloned. If the gh or glab CLI is signed in, ghis uses that."
+						"text": "No. Without one, ghis reads the repositories already on your computer. With a token it also includes pull or merge requests, reviews, repositories you never cloned and, on GitLab and Codeberg, your comments. If the gh or glab CLI is signed in, ghis uses that."
 					}
 				},
 				{
@@ -194,9 +195,9 @@
 				<article class="feature"><span class="f-icon" aria-hidden="true">🗓️</span><h3>Every day you showed up</h3><p>A contribution calendar for every year, with your longest streak and busiest day.</p></article>
 				<article class="feature"><span class="f-icon" aria-hidden="true">🦉</span><h3>Your rhythm</h3><p>The hours and weekdays you really code, in the timezone you committed from. Night owl or early bird?</p></article>
 				<article class="feature"><span class="f-icon" aria-hidden="true">📦</span><h3>Where your time went</h3><p>Repositories and languages by commits and lines changed. Lockfiles and build output don't count.</p></article>
-				<article class="feature"><span class="f-icon" aria-hidden="true">🤝</span><h3>Collaboration</h3><p>Pull and merge requests, time to merge, reviews, approvals and comments.</p></article>
+				<article class="feature"><span class="f-icon" aria-hidden="true">🤝</span><h3>Collaboration</h3><p>Pull and merge requests, time to merge, reviews and approvals. On GitLab and Codeberg, comments too.</p></article>
 				<article class="feature"><span class="f-icon" aria-hidden="true">🔥</span><h3>Highlights</h3><p>Your first commit, your biggest one, tickets touched and the words you reach for most.</p></article>
-				<article class="feature"><span class="f-icon" aria-hidden="true">✨</span><h3>Made to share</h3><p>Filter by year, hover for details, read any chart as a table, print it as a PDF. Light and dark.</p></article>
+				<article class="feature"><span class="f-icon" aria-hidden="true">✨</span><h3>Made to share</h3><p>Filter by year, hover for details, read the charts as tables, print it as a PDF. Light and dark.</p></article>
 			</div>
 		</section>
 
@@ -247,7 +248,7 @@ ghis</code></pre>
 				<li><b>Tokens never touch disk.</b> They stay in memory for one run and are never logged or shown.</li>
 				<li><b>No telemetry, no account, no server of ours.</b> The page is a file on your computer.</li>
 				<li><b>Hosting it?</b> Hosted mode adds an allowlist of hosts, HTTPS-only clones, no local file access and expiring stories.</li>
-				<li><b>Open and audited by its tests.</b> Every guarantee in <a data-repo-file="SECURITY.md" href="https://github.com/radufarcas10/ghis/blob/main/SECURITY.md">SECURITY.md</a> has a test behind it.</li>
+				<li><b>Open, and tested.</b> <a data-repo-file="SECURITY.md" href="https://github.com/radufarcas10/ghis/blob/main/SECURITY.md">SECURITY.md</a> spells out every guarantee, and the test suite checks the security-critical ones: the host allowlist, cross-site and DNS-rebinding blocks, and storage limits.</li>
 			</ul>
 		</section>
 
@@ -256,7 +257,7 @@ ghis</code></pre>
 			<h2>Questions</h2>
 			<div class="faq">
 				<details><summary>Which commits count as mine?</summary><div class="answer"><p>Commits whose author email is one of yours. ghis finds them on its own: your account's emails, plus every address you committed with under your git name. You can add more.</p></div></details>
-				<details><summary>Do I need a token?</summary><div class="answer"><p>No. Without one, ghis reads the repositories already on your computer. With a token it also includes pull or merge requests, reviews, comments, and repositories you never cloned. If the <code>gh</code> or <code>glab</code> CLI is signed in, ghis uses that.</p></div></details>
+				<details><summary>Do I need a token?</summary><div class="answer"><p>No. Without one, ghis reads the repositories already on your computer. With a token it also includes pull or merge requests, reviews, repositories you never cloned and, on GitLab and Codeberg, your comments. If the <code>gh</code> or <code>glab</code> CLI is signed in, ghis uses that.</p></div></details>
 				<details><summary>Does it work with my company's GitLab?</summary><div class="answer"><p>Yes. Self-managed GitLab, GitHub Enterprise Server, Forgejo and Gitea all work. ghis even reads your instance from the remotes of the repositories you have checked out.</p></div></details>
 				<details><summary>Why don't my line counts include everything?</summary><div class="answer"><p>Lockfiles, build output, vendored code and snapshots are left out, so one <code>npm install</code> doesn't outweigh a year of work. Pass <code>--count-all-files</code> to include them.</p></div></details>
 				<details><summary>Can I share my story?</summary><div class="answer"><p>Yes: print it to PDF, or share <code>out/history.json</code> and open it on any ghis server. Remember that it contains your commit messages and repository names.</p></div></details>
@@ -274,8 +275,15 @@ ghis</code></pre>
 	</main>
 
 	<footer class="foot">
-		<p>ghis is free software under the <a data-repo-file="LICENSE" href="https://github.com/radufarcas10/ghis/blob/main/LICENSE">MIT license</a>. Made by Radu Farcas.</p>
-		<p class="foot-links"><a class="foot-gh" data-repo-link href="https://github.com/radufarcas10/ghis"><svg width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02a9.6 9.6 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>GitHub</a> · <a data-repo-file="CONTRIBUTING.md" href="https://github.com/radufarcas10/ghis/blob/main/CONTRIBUTING.md">Contributing</a> · <a data-repo-file="SECURITY.md" href="https://github.com/radufarcas10/ghis/blob/main/SECURITY.md">Security</a></p>
+		<div class="foot-inner">
+			<div>
+				<p>ghis is free software under the <a data-repo-file="LICENSE" href="https://github.com/radufarcas10/ghis/blob/main/LICENSE">MIT license</a>.</p>
+				<p><a data-repo-link href="https://github.com/radufarcas10/ghis">GitHub</a> · <a data-repo-file="CONTRIBUTING.md" href="https://github.com/radufarcas10/ghis/blob/main/CONTRIBUTING.md">Contributing</a> · <a data-repo-file="SECURITY.md" href="https://github.com/radufarcas10/ghis/blob/main/SECURITY.md">Security</a></p>
+			</div>
+			<a class="maker" href="https://radufarcas.dev" target="_blank" rel="noopener author" title="Radu Farcas · radufarcas.dev">
+				Made by <span class="maker-logo" role="img" aria-label="Radu Farcas"></span>
+			</a>
+		</div>
 	</footer>
 
 	<script src="site.js"></script>

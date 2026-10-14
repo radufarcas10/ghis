@@ -78,8 +78,11 @@ class WebsiteTests(unittest.TestCase):
         self.assertEqual(
             graph["SoftwareSourceCode"]["codeRepository"], "https://github.com/radufarcas10/ghis"
         )
-        visible = re.findall(r"<summary>(.*?)</summary>", self.html)
-        structured = [q["name"] for q in graph["FAQPage"]["mainEntity"]]
+        pairs = re.findall(r'<summary>(.*?)</summary><div class="answer"><p>(.*?)</p>', self.html)
+        visible = [(q, re.sub(r"<[^>]+>", "", a).replace("&#39;", "'")) for q, a in pairs]
+        structured = [
+            (q["name"], q["acceptedAnswer"]["text"]) for q in graph["FAQPage"]["mainEntity"]
+        ]
         self.assertEqual(structured, visible)  # Google requires the markup to match the page
 
     def test_every_local_reference_exists(self) -> None:
@@ -90,6 +93,14 @@ class WebsiteTests(unittest.TestCase):
             if path in BUILT:
                 continue
             self.assertTrue((SITE / path).exists(), f"site/index.html points at missing {ref}")
+
+    def test_every_stylesheet_reference_exists(self) -> None:
+        # A missing mask image (the footer logo) fails silently: the element just disappears.
+        css = (SITE / "site.css").read_text()
+        for ref in re.findall(r"url\(([^)]+)\)", css):
+            ref = ref.strip("'\"")
+            if not ref.startswith(("data:", "http")):
+                self.assertTrue((SITE / ref).exists(), f"site.css points at missing {ref}")
 
     def test_sitemap_manifest_and_404(self) -> None:
         ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9"}

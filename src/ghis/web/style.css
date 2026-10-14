@@ -1,5 +1,5 @@
 /* ghis - shared styles for the story page and the connect page.
-   Chart colours follow a validated categorical palette (slot order is the CVD-safety
+   Chart colors follow a validated categorical palette (slot order is the CVD-safety
    mechanism, so keep it); dark mode is its own set of steps, not an inversion. */
 
 :root {
@@ -149,7 +149,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 	animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Fallback for browsers without View Transitions: colours ease instead of snapping. */
+/* Fallback for browsers without View Transitions: colors ease instead of snapping. */
 .theme-fade, .theme-fade *, .theme-fade *::before, .theme-fade *::after {
 	transition: background-color 0.6s ease, color 0.6s ease, border-color 0.6s ease,
 		fill 0.6s ease, stroke 0.6s ease, box-shadow 0.6s ease !important;

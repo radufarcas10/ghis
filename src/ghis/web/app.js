@@ -205,7 +205,7 @@
 		chartDrawers.push({ id: 'punch', draw: (w) => punchSVG(s.punch, w) });
 		const tiles = [
 			['Peak hour', hourLabel(peakHour), `${plural(s.hours[peakHour], 'commit')}`],
-			['Favourite day', WEEKDAYS_LONG[peakDay], `${pct(s.weekdays[peakDay], s.cs.length)}% of commits`],
+			['Favorite day', WEEKDAYS_LONG[peakDay], `${pct(s.weekdays[peakDay], s.cs.length)}% of commits`],
 			['After dark', `${s.nightPct}%`, '22:00 – 05:00'],
 			['Weekends', `${s.weekendPct}%`, 'Saturday and Sunday'],
 		];
