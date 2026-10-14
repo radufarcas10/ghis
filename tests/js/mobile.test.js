@@ -28,7 +28,9 @@ async function openChrome() {
 	// Port 0: Chrome picks a free port and writes it to DevToolsActivePort, so no collisions.
 	const proc = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0', '--no-first-run',
 		'--no-default-browser-check', '--no-sandbox', '--disable-gpu', `--user-data-dir=${profile}`,
-		'about:blank'], { stdio: 'ignore' });
+		'about:blank'], { stdio: 'ignore', detached: true });
+	// `google-chrome` is a launcher script: the browser and its helpers are its children.
+	// Their own process group lets one signal stop them all.
 	let port;
 	for (let i = 0; i < 300 && !port; i++) {
 		try { port = readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0]; } catch { await sleep(100); }
@@ -71,9 +73,18 @@ async function openChrome() {
 	const close = async () => {
 		ws.close();
 		const exited = new Promise((resolve) => proc.once('exit', resolve));
-		proc.kill();
-		await exited; // Chrome writes to its profile until it is gone
-		rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+		try { process.kill(-proc.pid, 'SIGTERM'); } catch { proc.kill(); }
+		await Promise.race([exited, sleep(5000)]);
+		// Helpers can still be flushing the profile for a moment after the launcher exits.
+		// Cleaning a temporary folder must never fail a test, so retry, then let it go.
+		for (let attempt = 0; attempt < 20; attempt++) {
+			try {
+				rmSync(profile, { recursive: true, force: true });
+				return;
+			} catch {
+				await sleep(250);
+			}
+		}
 	};
 	await send('Page.enable');
 	return { send, next, close };

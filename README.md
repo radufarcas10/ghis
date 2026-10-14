@@ -1,9 +1,14 @@
+<img src="src/ghis/web/favicon.svg" alt="ghis logo" width="72" height="72">
+
 # ghis
 
-**Your git history, told beautifully.** · [Website and live demo](https://radufarcas10.github.io/ghis/) ghis reads your commits, pull/merge requests and
-reviews from GitHub, GitLab, Codeberg or any git host, and turns them into an animated
-story page: a day-by-day calendar, your coding rhythm, where your time went, languages,
-collaboration stats and highlights.
+**Your git history, told beautifully.**
+
+[Website and live demo →](https://radufarcas10.github.io/ghis/)
+
+ghis reads your commits, pull/merge requests and reviews from GitHub, GitLab, Codeberg or
+any git host, and turns them into an animated story page: a day-by-day calendar, your coding
+rhythm, where your time went, languages, collaboration stats and highlights.
 
 ![The story page](docs/story.png)
 
