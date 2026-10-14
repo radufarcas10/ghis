@@ -18,7 +18,8 @@ GH_REPO_FIELDS = "nameWithOwner name url sshUrl createdAt pushedAt"
 
 GH_PR_FIELDS = (
     "number title state createdAt mergedAt closedAt url author { login } "
-    "comments { totalCount } repository { " + GH_REPO_FIELDS + " }"
+    "comments { totalCount } reviews(first: 30) { nodes { author { login } } } "
+    "repository { " + GH_REPO_FIELDS + " }"
 )
 
 
@@ -78,6 +79,14 @@ def github_request(pr: dict[str, Any]) -> dict[str, Any]:
         "closedAt": pr.get("closedAt"),
         "notes": (pr.get("comments") or {}).get("totalCount") or 0,
         "author": (pr.get("author") or {}).get("login"),
+        "reviewers": sorted(
+            {
+                (n.get("author") or {}).get("login")
+                for n in (pr.get("reviews") or {}).get("nodes") or []
+                if (n.get("author") or {}).get("login")
+                and (n.get("author") or {}).get("login") != (pr.get("author") or {}).get("login")
+            }
+        ),
         "url": pr.get("url"),
     }
 

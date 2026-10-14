@@ -127,7 +127,7 @@
 					"name": "Can I share my story?",
 					"acceptedAnswer": {
 						"@type": "Answer",
-						"text": "Yes: print it to PDF, or share out/history.json and open it on any ghis server. Remember that it contains your commit messages and repository names."
+						"text": "Yes. Download the share card, an image of your highlights with no repository names, commit messages or emails on it. To share the whole story, use Share-safe data: it removes messages and renames repositories and teammates, keeping every number."
 					}
 				}
 			]
@@ -197,7 +197,7 @@
 				<article class="feature"><span class="f-icon" aria-hidden="true">📦</span><h3>Where your time went</h3><p>Repositories and languages by commits and lines changed. Lockfiles and build output don't count.</p></article>
 				<article class="feature"><span class="f-icon" aria-hidden="true">🤝</span><h3>Collaboration</h3><p>Pull and merge requests, time to merge, reviews and approvals. On GitLab and Codeberg, comments too.</p></article>
 				<article class="feature"><span class="f-icon" aria-hidden="true">🔥</span><h3>Highlights</h3><p>Your first commit, your biggest one, tickets touched and the words you reach for most.</p></article>
-				<article class="feature"><span class="f-icon" aria-hidden="true">✨</span><h3>Made to share</h3><p>Filter by year, hover for details, read the charts as tables, print it as a PDF. Light and dark.</p></article>
+				<article class="feature"><span class="f-icon" aria-hidden="true">✨</span><h3>Made to share</h3><p>Filter by year or repository, compare with last year, then download an image of your highlights that's safe to post.</p></article>
 			</div>
 		</section>
 
@@ -260,7 +260,7 @@ ghis</code></pre>
 				<details><summary>Do I need a token?</summary><div class="answer"><p>No. Without one, ghis reads the repositories already on your computer. With a token it also includes pull or merge requests, reviews, repositories you never cloned and, on GitLab and Codeberg, your comments. If the <code>gh</code> or <code>glab</code> CLI is signed in, ghis uses that.</p></div></details>
 				<details><summary>Does it work with my company's GitLab?</summary><div class="answer"><p>Yes. Self-managed GitLab, GitHub Enterprise Server, Forgejo and Gitea all work. ghis even reads your instance from the remotes of the repositories you have checked out.</p></div></details>
 				<details><summary>Why don't my line counts include everything?</summary><div class="answer"><p>Lockfiles, build output, vendored code and snapshots are left out, so one <code>npm install</code> doesn't outweigh a year of work. Pass <code>--count-all-files</code> to include them.</p></div></details>
-				<details><summary>Can I share my story?</summary><div class="answer"><p>Yes: print it to PDF, or share <code>out/history.json</code> and open it on any ghis server. Remember that it contains your commit messages and repository names.</p></div></details>
+				<details><summary>Can I share my story?</summary><div class="answer"><p>Yes. Download the share card, an image of your highlights with no repository names, commit messages or emails on it. To share the whole story, use <b>Share-safe data</b>: it removes messages and renames repositories and teammates, keeping every number.</p></div></details>
 			</div>
 		</section>
 

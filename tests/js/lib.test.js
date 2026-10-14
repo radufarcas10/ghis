@@ -145,3 +145,153 @@ test('persona picks the strongest habit', () => {
 	assert.equal(of(at(11, 12, '2024-03-09'))[1], 'Weekend warrior');
 	assert.equal(of(at(11, 3)), null); // too little to say
 });
+
+// ------------------------------------------------------------ accuracy
+
+test('bulk commits count as commits but stay out of lines, languages and "biggest"', () => {
+	const model = lib.createModel({
+		commits: [
+			...Array.from({ length: 20 }, (_, i) => commit(`2024-02-${String(i + 1).padStart(2, '0')}T10:00:00Z`)), // 12 lines each
+			commit('2024-03-01T10:00:00Z', { a: 300, d: 20, s: 'Real feature' }),
+			commit('2024-03-02T10:00:00Z', { a: 48000, d: 0, s: 'Import legacy module', l: { PHP: 48000 } }),
+		],
+	});
+	assert.equal(model.bulkThreshold, 2000); // the floor: 40 × a 12-line median is only 480
+	const s = model.compute('all');
+	assert.equal(s.cs.length, 22);
+	assert.deepEqual([s.bulk.n, s.bulk.a], [1, 48000]);
+	assert.equal(s.adds, 20 * 10 + 300);
+	assert.equal(s.langs.PHP, undefined);
+	assert.equal(s.biggest.s, 'Real feature');
+});
+
+test('co-authored commits are counted and flagged', () => {
+	const model = lib.createModel({ commits: [commit('2024-01-01T10:00:00Z'), commit('2024-01-02T10:00:00Z', { co: 1 })] });
+	const s = model.compute('all');
+	assert.equal(s.cs.length, 2);
+	assert.equal(s.coAuthored, 1);
+});
+
+test('activity moves into the author\'s timezone, daylight saving included', () => {
+	const model = lib.createModel({
+		commits: [
+			commit('2024-01-10T22:00:00+02:00'), // winter: +02:00
+			commit('2024-07-10T22:00:00+03:00'), // summer: +03:00
+		],
+		activity: {
+			'2024-01-10T21': { commented: 1 }, // 23:00 at +02:00, still Jan 10
+			'2024-01-10T22': { approved: 1 }, // 00:00 at +02:00, already Jan 11
+			'2024-07-10T21': { commented: 1 }, // 00:00 at +03:00, already Jul 11
+			'2024-02-02': { reviewed: 1 }, // an older day key passes through
+		},
+	});
+	assert.deepEqual(model.activity['2024-01-10'], { commented: 1 });
+	assert.deepEqual(model.activity['2024-01-11'], { approved: 1 });
+	assert.deepEqual(model.activity['2024-07-11'], { commented: 1 });
+	assert.deepEqual(model.activity['2024-02-02'], { reviewed: 1 });
+	assert.equal(lib.offsetOf('2024-01-10T22:00:00-05:00'), -300);
+	assert.equal(lib.offsetOf('2024-01-10T22:00:00Z'), 0);
+});
+
+// ------------------------------------------------------------ exploring
+
+const projectsData = {
+	generatedAt: '2025-06-15T12:00:00Z',
+	user: { username: 'ada', createdAt: '2023-06-01T00:00:00Z' },
+	projects: [{ path: 'acme/web', name: 'web' }, { path: 'acme/api', name: 'api' }],
+	commits: [
+		commit('2024-02-01T10:00:00Z', { r: 0 }),
+		commit('2024-05-01T10:00:00Z', { r: 1 }),
+		commit('2024-09-01T10:00:00Z', { r: 0 }),
+		commit('2025-02-01T10:00:00Z', { r: 0 }),
+		commit('2025-06-13T10:00:00Z', { r: 0 }),
+		commit('2025-06-14T10:00:00Z', { r: 1 }),
+		commit('2025-06-15T09:00:00Z', { r: 0 }),
+	],
+	requests: [
+		{ project: 'acme/web', title: 'a', createdAt: '2024-03-01T10:00:00Z', mergedAt: '2024-03-02T10:00:00Z', state: 'merged', reviewers: ['bob', 'cleo'] },
+		{ project: 'acme/api', title: 'b', createdAt: '2025-03-01T10:00:00Z', mergedAt: '2025-03-01T12:00:00Z', state: 'merged', reviewers: ['bob'] },
+	],
+	reviews: [
+		{ project: 'acme/web', title: 'c', author: 'bob', createdAt: '2025-01-05T10:00:00Z' },
+		{ project: 'acme/web', title: 'd', author: 'bob', createdAt: '2025-01-06T10:00:00Z' },
+		{ project: 'acme/api', title: 'e', author: 'dina', createdAt: '2025-01-07T10:00:00Z' },
+	],
+};
+
+test('the repository filter narrows commits and requests', () => {
+	const model = lib.createModel(projectsData);
+	assert.deepEqual(model.repoOptions.map((o) => [o.path, o.n]), [['acme/web', 5], ['acme/api', 2]]);
+	const web = model.compute('all', { repo: 0 });
+	assert.equal(web.cs.length, 5);
+	assert.equal(web.reqs.length, 1);
+	assert.equal(web.revs.length, 2);
+	assert.deepEqual(web.events, {}); // events carry no repository
+});
+
+test('a year in progress is compared with the same days of the year before', () => {
+	const model = lib.createModel(projectsData);
+	const now = model.compute('2025');
+	const before = model.previous(now);
+	assert.equal(before.range, '2024');
+	assert.equal(before.until, '06-15');
+	assert.equal(before.cs.length, 2); // Feb 1 and May 1 2024, not Sep 1
+	assert.equal(lib.delta(now.cs.length, before.cs.length), 100);
+	assert.equal(lib.delta(5, 0), null);
+	assert.equal(model.previous(model.compute('all')), null);
+	assert.equal(model.previous(model.compute('2024')), null); // nothing in 2023
+});
+
+test('the current streak runs up to the day the story was made', () => {
+	const s = lib.createModel(projectsData).compute('all');
+	assert.deepEqual([s.currentStreak.start, s.currentStreak.end, s.currentStreak.len], ['2025-06-13', '2025-06-15', 3]);
+	assert.equal(lib.createModel(projectsData).compute('2024').currentStreak.len, 0);
+});
+
+test('people: who you review and who reviews you', () => {
+	const s = lib.createModel(projectsData).compute('all');
+	assert.deepEqual(s.people.reviewed, [['bob', 2], ['dina', 1]]);
+	assert.deepEqual(s.people.reviewers, [['bob', 2], ['cleo', 1]]);
+});
+
+test('milestones are all-time moments shown in the range they fall in', () => {
+	const model = lib.createModel(projectsData);
+	const all = model.milestones(model.compute('all'));
+	const kinds = all.map((m) => `${m.day} ${m.kind}${m.n ? ` ${m.n}` : ''}`);
+	assert.deepEqual(kinds, [
+		'2024-02-01 first 1',
+		'2024-03-01 request',
+		'2024-05-01 repo',
+		'2024-06-01 anniversary 1',
+		'2025-06-01 anniversary 2',
+	]);
+	assert.deepEqual(model.milestones(model.compute('2025')).map((m) => m.kind), ['anniversary']);
+});
+
+// ------------------------------------------------------------ sharing
+
+test('anonymize keeps the numbers and drops what was asked', () => {
+	const data = {
+		...projectsData,
+		source: { provider: 'gitlab', host: 'gitlab.corp.example', emails: ['ada@corp.example'] },
+		warnings: ['Could not clone acme/secret'],
+		commits: projectsData.commits.map((c) => ({ ...c, s: 'APP-1 secret plan', e: 'ada@corp.example' })),
+		requests: projectsData.requests.map((r) => ({ ...r, url: 'https://gitlab.corp.example/x' })),
+	};
+	const safe = lib.anonymize(data);
+	const text = JSON.stringify(safe);
+	for (const secret of ['secret', 'corp.example', 'acme/', 'bob', 'cleo', 'dina']) assert.ok(!text.includes(secret), secret);
+	assert.deepEqual(safe.projects.map((p) => p.path), ['Project A', 'Project B']); // by commits
+	assert.equal(safe.requests[1].project, 'Project B');
+	assert.equal(safe.reviews[0].author, safe.reviews[1].author); // one person, one alias
+	assert.equal(safe.commits.length, data.commits.length);
+	assert.equal(safe.commits[0].a, data.commits[0].a);
+	assert.deepEqual(safe.source.shareSafe, { messages: true, names: true });
+	assert.equal(data.projects[0].path, 'acme/web'); // the original is untouched
+
+	const namesOnly = lib.anonymize(data, { messages: false, names: true });
+	assert.equal(namesOnly.commits[0].s, 'APP-1 secret plan');
+	const messagesOnly = lib.anonymize(data, { messages: true, names: false });
+	assert.equal(messagesOnly.projects[0].path, 'acme/web');
+	assert.equal(messagesOnly.commits[0].s, '');
+});

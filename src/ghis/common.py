@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parent
@@ -51,9 +52,20 @@ def die(message: str) -> None:
 
 
 def bump(activity: dict[str, dict[str, int]], when: str | None, action: str) -> None:
+    """Count one activity event under its UTC hour ("2024-03-01T09"). The page moves the hour
+    into the author's own timezone, so a late-evening review lands on the same day as the
+    commits beside it. Timestamps without a timezone keep their day."""
     if not when:
         return
-    bucket = activity.setdefault(when[:10], {})
+    try:
+        moment = datetime.fromisoformat(when.replace("Z", "+00:00"))
+    except ValueError:
+        key = when[:10]
+    else:
+        key = (
+            moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H") if moment.tzinfo else when[:10]
+        )
+    bucket = activity.setdefault(key, {})
     bucket[action] = bucket.get(action, 0) + 1
 
 

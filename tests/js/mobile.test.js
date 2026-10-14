@@ -117,3 +117,30 @@ test('every page fits a phone without zooming out', { skip, timeout: 180000 }, a
 		assert.ok(page <= phone, `${name} is ${page}px wide on a ${phone}px phone; sticking out: ${culprits.join(', ') || 'a pseudo-element'}`);
 	}
 });
+
+test('the share card draws a 1200 x 630 image with content on it', { skip, timeout: 120000 }, async (t) => {
+	const out = mkdtempSync(path.join(tmpdir(), 'ghis-card-'));
+	t.after(() => rmSync(out, { recursive: true, force: true }));
+	execFileSync(PYTHON, [path.join(ROOT, 'ghis.py'), 'demo', '--out', out], { stdio: 'ignore' });
+	const chrome = await openChrome();
+	t.after(chrome.close);
+	const loaded = chrome.next('Page.loadEventFired', 30000);
+	await chrome.send('Page.navigate', { url: pathToFileURL(path.join(out, 'index.html')).href });
+	await loaded;
+	await chrome.send('Runtime.evaluate', { expression: SETTLED, awaitPromise: true });
+	const { result } = await chrome.send('Runtime.evaluate', {
+		returnByValue: true,
+		expression: `(() => {
+			const card = window.ghisShareCard();
+			const pixels = card.getContext('2d').getImageData(0, 0, card.width, card.height).data;
+			let bright = 0;
+			for (let i = 0; i < pixels.length; i += 4 * 31) if (pixels[i] + pixels[i + 1] + pixels[i + 2] > 450) bright++;
+			const preview = document.querySelector('#share-preview');
+			return { width: card.width, height: card.height, bright, preview: preview && preview.src.startsWith('data:image/png') };
+		})()`,
+	});
+	const card = result.value;
+	assert.deepEqual([card.width, card.height], [1200, 630]);
+	assert.ok(card.bright > 200, `the card looks empty (${card.bright} bright samples)`); // text and tiles drawn
+	assert.ok(card.preview, 'the page shows a preview of the card');
+});

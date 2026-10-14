@@ -52,6 +52,21 @@ which works the same as `python3 ghis.py` (stories and clones then live in `~/.g
 
 Press `Ctrl+C` in the terminal to stop ghis.
 
+## What's in a story
+
+- **Every day you showed up:** a calendar per year, your longest and current streaks.
+- **Momentum and rhythm:** commits month by month, and the hours and weekdays you code.
+- **Where and what:** repositories and languages, by commits and lines changed.
+- **Collaboration and people:** pull/merge requests, time to merge, reviews, and who you
+  review most and who reviews you (GitHub and GitLab).
+- **Highlights and milestones:** your biggest commit, your 1,000th, first commits to each
+  repository, anniversaries.
+- **Explore:** filter by year and by repository. A year is compared with the same days of the
+  year before ("▲ 12% vs 2025").
+- **Share:** download a 1200×630 image of your highlights. It has no repository names, commit
+  messages or emails on it. **Share-safe data** gives a copy of the whole story with messages
+  removed and repositories and teammates renamed.
+
 ## Where it can read from
 
 | Source | Adds on top of commits | Token scopes |
@@ -68,7 +83,16 @@ How it counts:
   you have used.
 - **Lines** exclude lockfiles, `dist/`, `vendor/`, `node_modules/`, minified files and test
   snapshots, so one `npm install` does not dwarf a year of work. Their commits still count.
-- **Times** are shown in the timezone you committed from.
+- **Co-authored commits** count too: a commit whose `Co-authored-by:` trailer names one of
+  your emails is yours as well (pair programming, suggested changes).
+- **Copies count once.** A commit that was rebased or cherry-picked onto another branch, or
+  pushed to a fork, has a new id but the same author, author time and message, so it is
+  recognized as the same change.
+- **Bulk changes** (an import, a vendored library, a formatter run) are commits bigger than
+  2,000 lines and 40 times your typical commit. They count as commits, but their lines are
+  left out of line totals and languages, and the story lists them separately.
+- **Times** are shown in the timezone you committed from. Review and comment activity is moved
+  into that same timezone, so it lands on the right day.
 - Clones are cached in `cache/`, so the second run only fetches what changed.
 
 ## Using the command line

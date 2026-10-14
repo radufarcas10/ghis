@@ -150,6 +150,7 @@ def gitlab_mr(
         "closed_at": None,
         "user_notes_count": 3,
         "author": {"username": author},
+        "reviewers": [{"username": "bob"}, {"username": "cleo"}] if author == "ada" else [],
         "web_url": f"https://gitlab.example/{project}/-/merge_requests/{iid}",
         "references": {"full": f"{project}!{iid}"},
     }
@@ -246,6 +247,9 @@ class GitLabTests(Isolated):
             [(1, "merged", "team/app"), (2, "opened", "team/api")],
         )
         self.assertEqual([r["number"] for r in data["reviews"]], [9])  # own MR filtered out
+        self.assertEqual(data["requests"][0]["reviewers"], ["bob", "cleo"])
+        # Activity is kept per UTC hour, for the page to move into the author's timezone.
+        self.assertTrue(all(len(day) == 13 for day in data["activity"]), list(data["activity"])[:3])
         self.assertEqual(by_day(data["activity"], "commented"), 1)
         self.assertEqual(by_day(data["activity"], "approved"), 1)
         self.assertEqual(by_day(data["activity"], "request_opened"), 1)
@@ -264,7 +268,7 @@ class GitLabTests(Isolated):
         data = collect_mod.collect(args, "gitlab", "glpat-secret")
         paths = [p["path"] for p in data["projects"]]
         app = paths.index("team/app")
-        self.assertEqual(len([c for c in data["commits"] if c["r"] == app]), 2)
+        self.assertEqual(len([c for c in data["commits"] if c["r"] == app]), 3)
         self.assertEqual(data["source"]["clonedRepos"], 1)
         # A second run fetches into the cached clone instead of cloning again.
         again = collect_mod.collect(args, "gitlab", "glpat-secret")
@@ -298,6 +302,13 @@ def github_pr(
         "url": f"https://github.example/{repo}/pull/{number}",
         "author": {"login": author},
         "comments": {"totalCount": 2},
+        "reviews": {
+            "nodes": [
+                {"author": {"login": "bob"}},
+                {"author": {"login": "bob"}},
+                {"author": {"login": author}},  # replying to a review is not reviewing
+            ]
+        },
         "repository": github_repo(repo),
     }
 
@@ -389,6 +400,7 @@ class GitHubTests(Isolated):
         )
         # Two reviews of one PR are one reviewed PR, but both count as activity.
         self.assertEqual([r["number"] for r in data["reviews"]], [7])
+        self.assertEqual(data["requests"][0]["reviewers"], ["bob"])  # deduped, author excluded
         self.assertEqual(by_day(data["activity"], "reviewed"), 1)
         self.assertEqual(by_day(data["activity"], "approved"), 1)
         self.assertEqual(by_day(data["activity"], "issue_opened"), 1)

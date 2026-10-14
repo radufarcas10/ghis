@@ -45,6 +45,7 @@ def make_demo(seed: int, provider: str) -> dict[str, Any]:
         "visual tests",
         "locale switcher",
     ]
+    teammates = ["maya", "tom", "lena", "ion", "sara", "kenji"]
     hour_weights = [1, 0, 0, 0, 0, 0, 1, 2, 5, 9, 12, 12, 6, 7, 11, 12, 10, 8, 4, 3, 3, 4, 3, 2]
     commits: list[dict[str, Any]] = []
     activity: dict[str, dict[str, int]] = {}
@@ -68,24 +69,28 @@ def make_demo(seed: int, provider: str) -> dict[str, Any]:
             langs = repos[r][2]
             lang = rng.choices(list(langs), list(langs.values()))[0]
             ticket = f"APP-{rng.randrange(100, 900)} " if rng.random() < 0.6 else ""
-            commits.append(
-                {
-                    "h": f"{rng.getrandbits(48):012x}",
-                    "t": when.isoformat(),
-                    "e": "ada@example.com",
-                    "a": adds,
-                    "d": dels,
-                    "f": rng.randint(1, 9),
-                    "s": f"{ticket}{rng.choice(verbs)} {rng.choice(things)}",
-                    "m": 0,
-                    "l": {lang: adds + dels},
-                    "r": r,
-                }
-            )
+            # About one commit in twelve was pair-programmed and authored by a teammate.
+            co_authored = rng.random() < 0.08
+            commit = {
+                "h": f"{rng.getrandbits(48):012x}",
+                "t": when.isoformat(),
+                "e": f"{rng.choice(teammates)}@example.com" if co_authored else "ada@example.com",
+                "a": adds,
+                "d": dels,
+                "f": rng.randint(1, 9),
+                "s": f"{ticket}{rng.choice(verbs)} {rng.choice(things)}",
+                "m": 0,
+                "l": {lang: adds + dels},
+                "r": r,
+            }
+            if co_authored:
+                commit["co"] = 1
+            commits.append(commit)
         if rate:
             for action, lam in (("commented", 2.2), ("approved", 0.7)):
                 for _ in range(int(rng.expovariate(1 / lam))):
-                    bump(activity, day.isoformat(), action)
+                    hour = rng.choices(range(24), hour_weights)[0]
+                    bump(activity, f"{day.isoformat()}T{hour:02d}:30:00+03:00", action)
             if rng.random() < 0.35:
                 created = datetime(
                     day.year, day.month, day.day, rng.randint(9, 17), tzinfo=timezone.utc
@@ -106,10 +111,11 @@ def make_demo(seed: int, provider: str) -> dict[str, Any]:
                         "closedAt": end.isoformat() if state == "closed" else None,
                         "notes": int(rng.expovariate(1 / 5)),
                         "author": "ada",
+                        "reviewers": rng.sample(teammates, rng.choice([1, 1, 2])),
                         "url": None,
                     }
                 )
-                bump(activity, day.isoformat(), "request_opened")
+                bump(activity, created.isoformat(), "request_opened")
             if rng.random() < 0.5:
                 reviews.append(
                     {
@@ -121,11 +127,35 @@ def make_demo(seed: int, provider: str) -> dict[str, Any]:
                         "mergedAt": None,
                         "closedAt": None,
                         "notes": 0,
-                        "author": "teammate",
+                        "author": rng.choices(teammates, [6, 4, 3, 2, 1, 1])[0],
                         "url": None,
                     }
                 )
         day += timedelta(days=1)
+
+    # A few bulk changes, the kind that dwarf real work in line counts: an import, a vendored
+    # library and a formatter run.
+    for days_ago, repo, subject, lang, size in (
+        (600, 1, "Import legacy orders module", "PHP", 48_000),
+        (380, 0, "Vendor charting library", "JavaScript", 31_000),
+        (150, 0, "Run prettier on the whole codebase", "Vue", 22_000),
+    ):
+        moment = datetime.combine(today - timedelta(days=days_ago), datetime.min.time())
+        when = moment.replace(hour=15, tzinfo=timezone(timedelta(hours=3)))
+        commits.append(
+            {
+                "h": f"{rng.getrandbits(48):012x}",
+                "t": when.isoformat(),
+                "e": "ada@example.com",
+                "a": size,
+                "d": size // 3 if "prettier" in subject else 0,
+                "f": 400,
+                "s": subject,
+                "m": 0,
+                "l": {lang: size},
+                "r": repo,
+            }
+        )
 
     commits.sort(key=lambda c: datetime.fromisoformat(c["t"]))
     return {

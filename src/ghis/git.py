@@ -127,6 +127,10 @@ HOME_DEPTH = 6  # how deep a personal server looks for checkouts under the home 
 
 
 LOG_FORMAT = "%x1e%H%x1f%P%x1f%aI%x1f%ae%x1f%s"
+# The same, plus the Co-authored-by trailers (\x1d-separated) before the subject.
+CO_FORMAT = (
+    "%x1e%H%x1f%P%x1f%aI%x1f%ae%x1f%(trailers:key=Co-authored-by,valueonly,separator=%x1d)%x1f%s"
+)
 
 
 RENAME_BRACES = re.compile(r"\{([^{}]*) => ([^{}]*)\}")
@@ -288,31 +292,37 @@ def language_of(path: str) -> str:
     return LANGUAGES.get(os.path.splitext(name)[1], "Other")
 
 
-def scan_repo(repo: str, emails: list[str], ignore: tuple[str, ...]) -> list[dict[str, Any]]:
-    args = [
-        "-C",
-        repo,
-        "-c",
-        "core.quotePath=false",
-        "log",
-        "--exclude=refs/stash",
-        "--exclude=refs/notes/*",
-        "--all",
-        "--numstat",
-        "--fixed-strings",
-        "--regexp-ignore-case",
-        f"--format={LOG_FORMAT}",
-    ]
-    args += [f"--author={email}" for email in emails]
-    out = git(args)
+def _log(repo: str, fmt: str, filters: list[str]) -> str:
+    return git(
+        [
+            "-C",
+            repo,
+            "-c",
+            "core.quotePath=false",
+            "log",
+            "--exclude=refs/stash",
+            "--exclude=refs/notes/*",
+            "--all",
+            "--numstat",
+            "--fixed-strings",
+            "--regexp-ignore-case",
+            f"--format={fmt}",
+            *filters,
+        ]
+    )
 
+
+def _parse(out: str, ignore: tuple[str, ...], trailers: bool) -> list[dict[str, Any]]:
     commits = []
+    fields = 6 if trailers else 5
     for chunk in out.split("\x1e")[1:]:
         header, _, body = chunk.partition("\n")
-        parts = header.split("\x1f", 4)
-        if len(parts) < 5:
+        parts = header.split("\x1f", fields - 1)
+        if len(parts) < fields:
             continue
-        sha, parents, when, email, subject = parts
+        sha, parents, when, email = parts[:4]
+        co_authors = parts[4].lower() if trailers else ""
+        subject = parts[-1]
         adds = dels = files = 0
         langs: dict[str, int] = {}
         for line in body.splitlines():
@@ -329,20 +339,38 @@ def scan_repo(repo: str, emails: list[str], ignore: tuple[str, ...]) -> list[dic
             dels += d
             lang = language_of(path)
             langs[lang] = langs.get(lang, 0) + a + d
-        commits.append(
-            {
-                "h": sha,
-                "t": when,
-                "e": email.lower(),
-                "a": adds,
-                "d": dels,
-                "f": files,
-                "s": subject[:200],
-                "m": 1 if len(parents.split()) > 1 else 0,
-                "l": langs,
-            }
-        )
+        commit = {
+            "h": sha,
+            "t": when,
+            "e": email.lower(),
+            "a": adds,
+            "d": dels,
+            "f": files,
+            "s": subject[:200],
+            "m": 1 if len(parents.split()) > 1 else 0,
+            "l": langs,
+        }
+        if trailers:
+            commit["_co"] = co_authors
+        commits.append(commit)
     return commits
+
+
+def scan_repo(repo: str, emails: list[str], ignore: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Your commits in one repository: the ones you authored, plus the ones that credit you
+    in a Co-authored-by trailer (pair programming, suggested changes), marked "co"."""
+    authored = _parse(_log(repo, LOG_FORMAT, [f"--author={e}" for e in emails]), ignore, False)
+    # --grep finds the email anywhere in the message; the trailer check below keeps only real
+    # co-authorship, and commits you also authored are already in the first list.
+    mentioned = _parse(_log(repo, CO_FORMAT, [f"--grep={e}" for e in emails]), ignore, True)
+    mine = set(emails)
+    co_authored = []
+    for commit in mentioned:
+        trailer = commit.pop("_co")
+        if commit["e"] not in mine and any(f"<{e}>" in trailer for e in mine):
+            commit["co"] = 1
+            co_authored.append(commit)
+    return authored + co_authored
 
 
 def check_git() -> None:

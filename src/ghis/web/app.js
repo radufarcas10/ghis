@@ -12,7 +12,7 @@
 	const {
 		esc, safeUrl, num, pct, plural, utc, fmtDay, monthFmt, monthShort, addDays, daysBetween,
 		weekdayOf, WEEKDAYS, WEEKDAYS_LONG, hourLabel, clamp, duration, median, initials,
-		vocabulary, actionLabels, createModel, persona, niceTicks, columnPath,
+		vocabulary, actionLabels, createModel, persona, niceTicks, columnPath, delta, anonymize, SITE_URL,
 	} = window.GhisLib;
 
 	// ------------------------------------------------------------ data loading
@@ -52,6 +52,7 @@
 	// ------------------------------------------------------------ model
 
 	let D, V, has, model, commits, projects, activity, langColors, years, generatedDay, ACTIONS;
+	let before = null; // the same stretch of the previous year, for the deltas
 
 	function init(data) {
 		D = data;
@@ -66,12 +67,22 @@
 		document.title = `${name} · ghis`;
 		if (hosted) $('#home').href = './';
 
-		const initial = location.hash.slice(1);
-		setRange(years.includes(initial) ? initial : 'all', false);
+		const initial = fromHash();
+		setRange(initial.range, initial.repo, false);
 		window.addEventListener('hashchange', () => {
-			const want = location.hash.slice(1);
-			setRange(years.includes(want) ? want : 'all', false);
+			const want = fromHash();
+			setRange(want.range, want.repo, false);
 		});
+	}
+
+	// #2025, #2025/3 or #all/3: a year and, optionally, a repository by index.
+	function fromHash() {
+		const [range, repo] = location.hash.slice(1).split('/');
+		const index = repo === undefined || repo === '' ? null : Number(repo);
+		return {
+			range: years.includes(range) ? range : 'all',
+			repo: model.repoOptions.some((o) => o.r === index) ? index : null,
+		};
 	}
 
 	// ------------------------------------------------------------ range & render
@@ -81,10 +92,15 @@
 	const lastCounts = new Map();
 	let chartDrawers = [];
 
-	function setRange(range, pushHash = true) {
-		state = model.compute(range);
-		if (pushHash) history.replaceState(null, '', range === 'all' ? location.pathname + location.search : `#${range}`);
+	function setRange(range, repo = state?.repo ?? null, pushHash = true) {
+		state = model.compute(range, { repo });
+		before = model.previous(state);
+		if (pushHash) {
+			const hash = range === 'all' && repo == null ? '' : `#${range}${repo == null ? '' : `/${repo}`}`;
+			history.replaceState(null, '', hash || location.pathname + location.search);
+		}
 		renderYears();
+		renderRepoPicker();
 		render();
 	}
 
@@ -96,7 +112,142 @@
 			: '';
 		nav.onclick = (e) => {
 			const button = e.target.closest('[data-range]');
-			if (button && button.dataset.range !== state.range) setRange(button.dataset.range);
+			if (button && button.dataset.range !== state.range) setRange(button.dataset.range, state.repo);
+		};
+	}
+
+	// The repository picker: a button that opens a searchable list. It is a combobox in ARIA
+	// terms: focus stays in the search box while the arrow keys move the active option.
+	let picker = null;
+
+	function renderRepoPicker() {
+		const mount = $('#repo-pick');
+		if (!mount) return;
+		mount.hidden = model.repoOptions.length < 2;
+		if (mount.hidden) return;
+		if (!picker) picker = buildPicker(mount);
+		picker.sync();
+	}
+
+	function buildPicker(mount) {
+		const total = model.commits.length;
+		const max = Math.max(1, ...model.repoOptions.map((o) => o.n));
+		const chevron = '<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+		const check = '<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>';
+		const nameHtml = (path) => {
+			const cut = path.lastIndexOf('/');
+			return cut < 0 ? `<b>${esc(path)}</b>` : `<span class="ro-org">${esc(path.slice(0, cut + 1))}</span><b>${esc(path.slice(cut + 1))}</b>`;
+		};
+		const options = [{ r: '', path: 'All repositories', n: total, all: true }, ...model.repoOptions];
+		mount.innerHTML = `
+			<button type="button" class="repo-button" aria-haspopup="listbox" aria-expanded="false" aria-controls="repo-panel">
+				<span class="repo-current"></span>${chevron}
+			</button>
+			<div class="repo-panel" id="repo-panel" hidden>
+				<div class="repo-search-wrap">
+					<input class="repo-search" type="search" placeholder="Find a repository" aria-label="Find a repository"
+						role="combobox" aria-expanded="true" aria-controls="repo-list" aria-autocomplete="list" autocomplete="off" spellcheck="false">
+				</div>
+				<ul class="repo-list" id="repo-list" role="listbox" aria-label="Repositories">
+					${options.map((o, i) => `<li role="option" id="repo-opt-${i}" data-repo="${o.r}" data-path="${esc(o.path.toLowerCase())}" title="${esc(o.path)}" aria-selected="false">
+						<span class="ro-name">${o.all ? '<b>All repositories</b>' : nameHtml(o.path)}</span>
+						<span class="ro-bar" aria-hidden="true"><i style="--v:${o.all ? 1 : o.n / max}"></i></span>
+						<span class="ro-n">${num(o.n)}</span>
+						<span class="ro-check">${check}</span>
+					</li>`).join('')}
+				</ul>
+				<p class="repo-empty" hidden>No repository matches.</p>
+			</div>`;
+
+		const button = mount.querySelector('.repo-button');
+		const panel = mount.querySelector('.repo-panel');
+		const search = mount.querySelector('.repo-search');
+		const items = [...mount.querySelectorAll('[role="option"]')];
+		const empty = mount.querySelector('.repo-empty');
+		let active = -1;
+		let lastPointer = 'mouse'; // how the picker was last opened: a tap should not pop the keyboard
+
+		const visible = () => items.filter((li) => !li.hidden);
+		const setActive = (li) => {
+			items.forEach((x) => x.classList.toggle('active', x === li));
+			active = items.indexOf(li);
+			search.setAttribute('aria-activedescendant', li ? li.id : '');
+			li?.scrollIntoView({ block: 'nearest' });
+		};
+		const open = () => {
+			if (!panel.hidden) return;
+			panel.hidden = false;
+			button.setAttribute('aria-expanded', 'true');
+			requestAnimationFrame(() => panel.classList.add('open'));
+			search.value = '';
+			filter();
+			setActive(items.find((li) => li.getAttribute('aria-selected') === 'true') || items[0]);
+			// A tap would pop the on-screen keyboard over the list; there, the list is the point.
+			if (lastPointer !== 'touch') search.focus();
+			document.addEventListener('pointerdown', outside, true);
+		};
+		const close = (refocus) => {
+			if (panel.hidden) return;
+			panel.classList.remove('open');
+			panel.hidden = true;
+			button.setAttribute('aria-expanded', 'false');
+			document.removeEventListener('pointerdown', outside, true);
+			if (refocus) button.focus();
+		};
+		const outside = (e) => { if (!mount.contains(e.target)) close(false); };
+		const choose = (li) => {
+			if (!li) return;
+			close(true);
+			const repo = li.dataset.repo === '' ? null : Number(li.dataset.repo);
+			if (repo !== state.repo) setRange(state.range, repo);
+		};
+		function filter() {
+			const words = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+			for (const li of items) li.hidden = !words.every((w) => li.dataset.path.includes(w));
+			empty.hidden = visible().length > 0;
+			if (!visible().includes(items[active])) setActive(visible()[0] || null);
+		}
+
+		button.addEventListener('pointerdown', (e) => { lastPointer = e.pointerType; });
+		button.addEventListener('click', (e) => {
+			if (e.detail === 0) lastPointer = 'keyboard'; // Enter or Space on the button
+			if (panel.hidden) open(); else close(true);
+		});
+		button.addEventListener('keydown', (e) => {
+			if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); lastPointer = 'keyboard'; open(); }
+		});
+		search.addEventListener('input', filter);
+		search.addEventListener('keydown', (e) => {
+			const list = visible();
+			const at = list.indexOf(items[active]);
+			const moves = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: list.length - 1, PageDown: at + 8, PageUp: at - 8 };
+			if (e.key in moves && list.length) {
+				e.preventDefault();
+				setActive(list[Math.max(0, Math.min(list.length - 1, moves[e.key]))]);
+			} else if (e.key === 'Enter') {
+				e.preventDefault();
+				choose(items[active]);
+			} else if (e.key === 'Escape') {
+				e.preventDefault();
+				close(true);
+			} else if (e.key === 'Tab') {
+				close(false);
+			}
+		});
+		for (const li of items) {
+			li.addEventListener('pointermove', () => { if (items[active] !== li) setActive(li); });
+			li.addEventListener('click', () => choose(li));
+		}
+
+		return {
+			sync() {
+				const current = state.repo == null ? '' : String(state.repo);
+				const selected = items.find((li) => li.dataset.repo === current) || items[0];
+				items.forEach((li) => li.setAttribute('aria-selected', String(li === selected)));
+				const label = current === '' ? 'All repositories' : repoName(state.repo);
+				mount.querySelector('.repo-current').innerHTML = `<span class="sr-only">Repository: </span>${esc(label)}`;
+				button.title = current === '' ? 'Show one repository' : model.repoOptions.find((o) => String(o.r) === current)?.path || label;
+			},
 		};
 	}
 
@@ -111,11 +262,15 @@
 			reposSection(s),
 			languagesSection(s),
 			requestsSection(s),
+			peopleSection(s),
 			highlightsSection(s),
+			milestonesSection(s),
 			wordsSection(s),
+			shareSection(s),
 			footer(),
 		].join('');
 		drawCharts(true);
+		drawSharePreview();
 		observe();
 	}
 
@@ -137,25 +292,51 @@
 		const since = user.createdAt ? user.createdAt.slice(0, 10) : first;
 		const sinceText = since ? `${D.source?.provider && user.createdAt ? `on ${esc(V.host)} since` : 'committing since'} ${fmtDay(since)} · ${plural(daysBetween(since, generatedDay), 'day')}` : '';
 		const handle = user.username ? `@${esc(user.username)}` : '';
-		const eyebrow = s.range === 'all' ? `Your ${esc(V.host)} story · all time` : `Your ${s.range} in code`;
+		const where = s.repo == null ? '' : ` in ${esc(repoName(s.repo))}`;
+		const eyebrow = s.range === 'all' ? `Your ${esc(V.host)} story${where} · all time` : `Your ${s.range}${where || ' in code'}`;
 		const net = s.adds - s.dels;
+		const b = before;
 		const tiles = [
-			['Lines added', counter('adds', s.adds), `${net >= 0 ? '+' : '−'}${num(Math.abs(net))} net`],
-			['Lines removed', counter('dels', s.dels), s.adds ? `${pct(s.dels, s.adds)}% of what you added` : ''],
-			['Active days', counter('days', s.activeDays.length), s.streak.len ? `best streak ${plural(s.streak.len, 'day')}` : ''],
-			['Repositories', counter('repos', s.repos.length), `${num(projects.length)} touched in total`],
+			['Lines added', counter('adds', s.adds), `${net >= 0 ? '+' : '−'}${num(Math.abs(net))} net${s.bulk.n ? ` · ${plural(s.bulk.n, 'bulk change')} left out` : ''}`, b && b.adds, s.adds],
+			['Lines removed', counter('dels', s.dels), s.adds ? `${pct(s.dels, s.adds)}% of what you added` : '', b && b.dels, s.dels],
+			['Active days', counter('days', s.activeDays.length), s.streak.len ? `best streak ${plural(s.streak.len, 'day')}` : '', b && b.activeDays.length, s.activeDays.length],
 		];
-		if (has.has('requests')) tiles.push([`${V.REQS} merged`, counter('merged', s.merged.length), `${num(s.reqs.length)} opened`]);
-		if (has.has('reviews')) tiles.push(['Reviews', counter('reviews', s.revs.length), has.has('approvals') ? `${num(s.events.approved || 0)} approvals` : '']);
+		if (s.repo == null) tiles.push(['Repositories', counter('repos', s.repos.length), `${num(projects.length)} touched in total`, b && b.repos.length, s.repos.length]);
+		if (has.has('requests')) tiles.push([`${V.REQS} merged`, counter('merged', s.merged.length), `${num(s.reqs.length)} opened`, b && b.merged.length, s.merged.length]);
+		if (has.has('reviews')) tiles.push(['Reviews', counter('reviews', s.revs.length), has.has('approvals') ? `${num(s.events.approved || 0)} approvals` : '', b && b.revs.length, s.revs.length]);
+
 		return `<section class="hero">
 			<div class="monogram" aria-hidden="true">${esc(initials(user.name || user.username))}</div>
 			<p class="eyebrow">${eyebrow}</p>
 			<h1>${esc(user.name || user.username || 'Your history')}</h1>
 			<p class="sub">${[handle, sinceText].filter(Boolean).join(' · ')}</p>
-			<div class="hero-figure"><span class="value">${counter('commits', s.cs.length)}</span><span class="label">${s.cs.length === 1 ? 'commit' : 'commits'}${s.range === 'all' ? '' : ` in ${s.range}`}</span></div>
-			<div class="tiles">${tiles.map(([label, value, sub], i) => `<div class="tile" style="--i:${i}"><span class="t-label">${label}</span><span class="t-value">${value}</span>${sub ? `<span class="t-sub">${sub}</span>` : ''}</div>`).join('')}</div>
+			<div class="hero-figure"><span class="value">${counter('commits', s.cs.length)}</span><span class="label">${s.cs.length === 1 ? 'commit' : 'commits'}${s.range === 'all' ? '' : ` in ${s.range}`}${s.coAuthored ? ` · ${num(s.coAuthored)} co-authored` : ''}</span>${b ? `<span class="vs">${deltaBadge(s.cs.length, b.cs.length)} vs ${comparedTo()}</span>` : ''}</div>
+			<div class="tiles">${tiles.map(([label, value, sub, prior, now], i) => `<div class="tile" style="--i:${i}"><span class="t-label">${label}${b ? deltaBadge(now, prior) : ''}</span><span class="t-value">${value}</span>${sub ? `<span class="t-sub">${sub}</span>` : ''}</div>`).join('')}</div>
 			<p class="scroll-cue">Scroll for the story <span aria-hidden="true">↓</span></p>
 		</section>`;
+	}
+
+	function comparedTo() {
+		return before.until ? `the same days of ${before.range}` : before.range;
+	}
+
+	// A change against last year, as an arrow and a percentage. Ink colors, not good/bad
+	// colors: more lines removed is not worse, and fewer late nights is not a decline.
+	function deltaBadge(now, then) {
+		const change = delta(now, then);
+		if (change == null) return '';
+		const arrow = change > 0 ? '▲' : change < 0 ? '▼' : '=';
+		const title = `${num(now)} now, ${num(then)} in ${comparedTo()}`;
+		return `<span class="delta" title="${esc(title)}"><span aria-hidden="true">${arrow}</span> ${Math.abs(change)}%<span class="sr-only"> ${change >= 0 ? 'more' : 'fewer'} than ${esc(comparedTo())}</span></span>`;
+	}
+
+	function repoName(r) {
+		return projects[r]?.name || projects[r]?.path || `repository ${r}`;
+	}
+
+	// Commit messages and titles can be removed by a share-safe export.
+	function quoted(text) {
+		return text ? `“${esc(text)}”` : '<i>message removed</i>';
 	}
 
 	function calendarSection(s) {
@@ -170,8 +351,10 @@
 				<div class="scale-legend" aria-hidden="true">Less <i class="l0"></i><i class="l1"></i><i class="l2"></i><i class="l3"></i><i class="l4"></i> More</div>
 				<p class="note">${s.streak.len > 1 ? `Longest streak: <b>${plural(s.streak.len, 'day')}</b>, ${fmtDay(s.streak.start)} – ${fmtDay(s.streak.end)}. ` : ''}${s.busiest ? `Busiest day: <b>${fmtDay(s.busiest.day)}</b> with ${plural(s.busiest.n, 'commit')}.` : ''}</p>`
 			: '<p class="empty-note">No activity in this range.</p>';
-		return section('calendar', 'Every day', 'The days you showed up',
-			extra ? `Each square is a day: commits plus ${V.reqs}, reviews and comments.` : 'Each square is a day, shaded by how many commits you made.', body);
+		const lede = s.repo != null
+			? `Each square is a day, shaded by your commits to <b>${esc(repoName(s.repo))}</b>.`
+			: extra ? `Each square is a day: commits plus ${V.reqs}, reviews and comments, in your own timezone.` : 'Each square is a day, shaded by how many commits you made.';
+		return section('calendar', 'Every day', 'The days you showed up', lede, body);
 	}
 
 	function monthsSection(s) {
@@ -219,7 +402,7 @@
 	}
 
 	function reposSection(s) {
-		if (!s.repos.length) return '';
+		if (!s.repos.length || s.repo != null) return '';
 		const top = s.repos.slice(0, 10);
 		const max = top[0].n;
 		const reqCount = {};
@@ -254,7 +437,7 @@
 		const legend = parts.map((p) => `<li><i class="sw" style="--c:${p.c}"></i><span>${esc(p.lang)}</span><span class="pct">${pct(p.n, total) || '<1'}%</span><span class="sub">${num(p.n)} lines${p.detail ? ` · ${esc(p.detail)}` : ''}</span></li>`).join('');
 		const table = dataTable(['Language', 'Lines changed', 'Share'], entries.map(([l, n]) => [l, num(n), `${(n / total * 100).toFixed(1)}%`]), [1, 2]);
 		return section('languages', 'What', 'What you wrote in',
-			`Measured in lines added and removed. Mostly <b>${esc(entries[0][0])}</b>${entries[1] ? `, then ${esc(entries[1][0])}` : ''}.`,
+			`Measured in lines added and removed${s.bulk.n ? ', bulk changes left out' : ''}. Mostly <b>${esc(entries[0][0])}</b>${entries[1] ? `, then ${esc(entries[1][0])}` : ''}.`,
 			`<div class="chart"><div class="stack" role="img" aria-label="Share of lines changed by language">${bar}</div></div><ul class="legend">${legend}</ul>${table}`);
 	}
 
@@ -281,7 +464,7 @@
 
 		const discussed = [...s.reqs].sort((a, b) => (b.notes || 0) - (a.notes || 0))[0];
 		const longest = [...s.ttm].sort((a, b) => b.ms - a.ms)[0];
-		const link = (r) => (safeUrl(r.url) ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a>` : esc(r.title));
+		const link = (r) => (safeUrl(r.url) ? `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${quoted(r.title)}</a>` : quoted(r.title));
 		const callouts = [];
 		if (discussed?.notes) callouts.push(['💬', 'Most discussed', plural(discussed.notes, 'comment'), `${link(discussed)} · ${esc(discussed.project)}`]);
 		if (longest) callouts.push(['🐢', 'Longest road to merge', duration(longest.ms), `${link(longest.r)} · ${esc(longest.r.project)}`]);
@@ -304,15 +487,78 @@
 		const cards = [];
 		if (s.streak.len) cards.push(['🔥', 'Longest streak', plural(s.streak.len, 'day'), `${fmtDay(s.streak.start)} → ${fmtDay(s.streak.end)}`]);
 		if (s.busiest) cards.push(['⚡', 'Busiest day', plural(s.busiest.n, 'commit'), `${WEEKDAYS_LONG[weekdayOf(s.busiest.day)]}, ${fmtDay(s.busiest.day)}`]);
-		if (s.biggest) cards.push(['🧱', 'Biggest commit', `+${num(s.biggest.a)} / −${num(s.biggest.d)}`, `“${esc(s.biggest.s)}” · ${project(s.biggest)}`]);
-		cards.push(['🌱', s.range === 'all' ? 'Where it started' : `First commit of ${s.range}`, fmtDay(first.day), `“${esc(first.s)}” · ${project(first)}`]);
-		if (last !== first) cards.push(['📍', 'Most recent', fmtDay(last.day), `“${esc(last.s)}” · ${project(last)}`]);
+		if (s.currentStreak.len > 1) cards.push(['🟢', 'Current streak', plural(s.currentStreak.len, 'day'), `since ${fmtDay(s.currentStreak.start)}, and still going`]);
+		if (s.biggest) cards.push(['🧱', 'Biggest commit', `+${num(s.biggest.a)} / −${num(s.biggest.d)}`, `${quoted(s.biggest.s)} · ${project(s.biggest)}`]);
+		cards.push(['🌱', s.range === 'all' ? 'Where it started' : `First commit of ${s.range}`, fmtDay(first.day), `${quoted(first.s)} · ${project(first)}`]);
+		if (last !== first) cards.push(['📍', 'Most recent', fmtDay(last.day), `${quoted(last.s)} · ${project(last)}`]);
+		if (s.coAuthored) cards.push(['🧑‍🤝‍🧑', 'Pair-programmed', plural(s.coAuthored, 'commit'), 'authored by a teammate, with you as co-author']);
+		if (s.bulk.n) {
+			const examples = s.bulk.commits.slice().sort((a, b) => b.a + b.d - a.a - a.d).slice(0, 2).map((c) => quoted(c.s)).join(', ');
+			cards.push(['📦', 'Bulk changes', plural(s.bulk.n, 'commit'), `${num(s.bulk.a + s.bulk.d)} lines left out of the line counts, like ${examples}`]);
+		}
 		if (s.tickets.size) cards.push(['🎫', 'Tickets referenced', num(s.tickets.size), 'distinct ticket keys in commits and titles']);
 		const avg = s.cs.length ? Math.round((s.adds + s.dels) / s.cs.length) : 0;
 		cards.push(['📏', 'Typical commit', `${num(avg)} lines`, `${num(Math.round(s.cs.reduce((n, c) => n + c.f, 0) / s.cs.length))} files on average`]);
 		if (s.mergesPct) cards.push(['🔀', 'Merge commits', `${s.mergesPct}%`, 'of your commits joined two branches']);
 		return section('highlights', 'Highlights', 'Moments worth remembering', '',
 			`<div class="cards">${cards.map((c, i) => card(c, i)).join('')}</div>`);
+	}
+
+	function peopleSection(s) {
+		const { reviewed, reviewers } = s.people;
+		if (!reviewed.length && !reviewers.length) return '';
+		const list = (rows, what) => (rows.length
+			? `<ol class="people">${rows.slice(0, 6).map(([name, n], i) => `<li style="--i:${i}"><span class="avatar" aria-hidden="true">${esc(initials(name))}</span><span class="who">@${esc(name)}</span><span class="n">${plural(n, what)}</span></li>`).join('')}</ol>`
+			: '<p class="empty-note">Not available from this host.</p>');
+		const mutual = reviewed[0] && reviewers[0] && reviewed[0][0] === reviewers[0][0] ? reviewed[0][0] : null;
+		const lede = mutual
+			? `You and <b>@${esc(mutual)}</b> review each other more than anyone else.`
+			: reviewed[0] ? `You reviewed <b>@${esc(reviewed[0][0])}</b>'s work most.` : '';
+		return section('people', 'People', 'Who you build with', lede,
+			`<div class="grid-2"><div><p class="kicker">You reviewed most</p>${list(reviewed, V.REQ)}</div>
+			<div><p class="kicker">Reviewed your work most</p>${list(reviewers, V.REQ)}</div></div>`);
+	}
+
+	const ordinal = (n) => {
+		const tail = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th');
+		return `${num(n)}${tail}`;
+	};
+
+	function milestonesSection(s) {
+		const top = new Set(model.repoOptions.slice(0, 8).map((o) => o.r));
+		const items = model.milestones(s).filter((m) => m.kind !== 'repo' || top.has(m.commit.r));
+		if (!items.length) return '';
+		const where = (c) => (s.repo == null ? ` · ${esc(repoName(c.r))}` : '');
+		const describe = (m) => {
+			switch (m.kind) {
+				case 'first': return ['🌱', 'Your first commit', `${quoted(m.commit.s)}${where(m.commit)}`];
+				case 'count': return ['🏁', `Your ${ordinal(m.n)} commit`, `${quoted(m.commit.s)}${where(m.commit)}`];
+				case 'repo': return ['📦', `First commit to ${esc(repoName(m.commit.r))}`, quoted(m.commit.s)];
+				case 'request': return ['🚀', `Your first ${V.req}`, `${quoted(m.request.title)} · ${esc(m.request.project)}`];
+				case 'merged': return ['🎉', `Your ${ordinal(m.n)} ${V.req} merged`, `${quoted(m.request.title)} · ${esc(m.request.project)}`];
+				case 'anniversary': return ['🎂', `${plural(m.n, 'year')} on ${esc(V.host)}`, 'Happy anniversary.'];
+				default: return ['•', '', ''];
+			}
+		};
+		const rows = items.map((m, i) => {
+			const [icon, title, detail] = describe(m);
+			return `<li style="--i:${i}"><span class="ms-icon" aria-hidden="true">${icon}</span><div><time datetime="${m.day}">${fmtDay(m.day)}</time><b>${title}</b><span>${detail}</span></div></li>`;
+		}).join('');
+		return section('milestones', 'Milestones', 'Along the way', '', `<ol class="timeline">${rows}</ol>`);
+	}
+
+	function shareSection() {
+		return section('share', 'Share', 'Share your story',
+			'An image of your highlights, safe to post: no repository names, commit messages or emails on it.',
+			`<div class="share">
+				<figure class="share-card"><img id="share-preview" alt="Your ghis share card: your name, commits, lines, days, streak and calendar" width="1200" height="630"></figure>
+				<div class="share-actions">
+					<button class="btn primary" type="button" data-share="card">Download image</button>
+					<button class="btn" type="button" data-share="data">Share-safe data…</button>
+					<button class="btn" type="button" data-print>Print or save as PDF</button>
+					<p class="note">The image follows the year and repository you picked above.</p>
+				</div>
+			</div>`);
 	}
 
 	function wordsSection(s) {
@@ -342,12 +588,13 @@
 		const actions = [];
 		if (hosted && query.get('job')) actions.push(`<a class="btn small" href="api/jobs/${encodeURIComponent(query.get('job'))}/result?download=1">Download history.json</a>`);
 		if (hosted) actions.push('<a class="btn small" href="./">Make another story</a>');
-		actions.push('<button class="btn small" type="button" data-print>Print / save as PDF</button>');
+
 		return `<footer class="foot">
 			<p>Built by ghis on ${fmtDay(generatedDay)} from ${parts.join(', ') || 'git'}.
-			Commits matched by ${esc((src.emails || []).join(', ') || 'your email')}.</p>
+			${src.emails?.length ? `Commits matched by ${esc(src.emails.join(', '))}.` : ''}
+			${src.shareSafe ? `This is a share-safe copy${src.shareSafe.names ? ': repositories and teammates are renamed' : ''}${src.shareSafe.messages ? `${src.shareSafe.names ? ' and' : ':'} messages are removed` : ''}.` : ''}</p>
 			${warnings.length ? `<details><summary>${plural(warnings.length, 'note')} about this data</summary><ul>${warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}
-			<div class="actions">${actions.join('')}</div>
+			${actions.length ? `<div class="actions">${actions.join('')}</div>` : ''}
 		</footer>`;
 	}
 
@@ -470,6 +717,212 @@
 		clearTimeout(resizeTimer);
 		resizeTimer = setTimeout(() => drawCharts(false), 150);
 	});
+
+	// ------------------------------------------------------------ share card
+
+	const CARD = { w: 1200, h: 630 };
+	const INK = { page: '#0d0d0d', surface: '#1a1a19', ink: '#f0efec', muted: '#9a988f', line: 'rgba(255,255,255,0.09)' };
+	const LEVELS = ['#232321', '#104281', '#1c5cab', '#3987e5', '#86b6ef'];
+	const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+
+	function roundRect(ctx, x, y, w, h, r) {
+		ctx.beginPath();
+		ctx.moveTo(x + r, y);
+		ctx.arcTo(x + w, y, x + w, y + h, r);
+		ctx.arcTo(x + w, y + h, x, y + h, r);
+		ctx.arcTo(x, y + h, x, y, r);
+		ctx.arcTo(x, y, x + w, y, r);
+		ctx.closePath();
+	}
+
+	// The ghis mark: a rounded square with three rising bars, as in favicon.svg.
+	function drawLogo(ctx, x, y, size, square, bars) {
+		const k = size / 32;
+		ctx.fillStyle = square;
+		roundRect(ctx, x, y, size, size, 8 * k);
+		ctx.fill();
+		ctx.fillStyle = bars;
+		for (const [bx, by, bh] of [[6, 18, 8], [13.5, 11, 15], [21, 6, 20]]) {
+			roundRect(ctx, x + bx * k, y + by * k, 5 * k, bh * k, 1.5 * k);
+			ctx.fill();
+		}
+	}
+
+	function fitText(ctx, text, maxWidth, weight, size) {
+		let px = size;
+		do { ctx.font = `${weight} ${px}px ${FONT}`; px -= 2; } while (ctx.measureText(text).width > maxWidth && px > 20);
+		return text;
+	}
+
+	// 1200 x 630, the size every link-preview and social site expects. Always the dark
+	// design, whatever the page theme, so a shared card looks the same everywhere. It never
+	// shows repository names, messages or emails.
+	function shareCanvas(s) {
+		const canvas = document.createElement('canvas');
+		canvas.width = CARD.w;
+		canvas.height = CARD.h;
+		const ctx = canvas.getContext('2d');
+		ctx.fillStyle = INK.page;
+		ctx.fillRect(0, 0, CARD.w, CARD.h);
+		for (const [x, y, r, color] of [[140, -60, 520, 'rgba(57,135,229,0.30)'], [1120, 680, 560, 'rgba(144,133,233,0.24)']]) {
+			const glow = ctx.createRadialGradient(x, y, 0, x, y, r);
+			glow.addColorStop(0, color);
+			glow.addColorStop(1, 'rgba(0,0,0,0)');
+			ctx.fillStyle = glow;
+			ctx.fillRect(0, 0, CARD.w, CARD.h);
+		}
+
+		// Brand, top left.
+		drawLogo(ctx, 64, 56, 44, INK.ink, INK.page);
+		ctx.fillStyle = INK.ink;
+		ctx.font = `800 34px ${FONT}`;
+		ctx.textBaseline = 'middle';
+		ctx.fillText('ghis', 122, 79);
+
+		// What this card covers, top right.
+		const what = s.range === 'all' ? `MY ${V.host.toUpperCase()} STORY` : `MY ${s.range} IN CODE`;
+		ctx.textAlign = 'right';
+		ctx.fillStyle = INK.muted;
+		ctx.font = `700 20px ${FONT}`;
+		ctx.fillText(what, CARD.w - 64, 79);
+		ctx.textAlign = 'left';
+
+		// Name and the headline number.
+		const user = D.user || {};
+		ctx.fillStyle = INK.ink;
+		ctx.textBaseline = 'alphabetic';
+		fitText(ctx, user.name || user.username || 'My history', 560, 800, 56);
+		ctx.fillText(user.name || user.username || 'My history', 64, 196);
+		const headline = num(s.cs.length);
+		fitText(ctx, headline, 560, 850, 150);
+		const gradient = ctx.createLinearGradient(64, 0, 64 + ctx.measureText(headline).width, 0);
+		gradient.addColorStop(0, '#3987e5');
+		gradient.addColorStop(0.55, '#9085e9');
+		gradient.addColorStop(1, '#199e70');
+		ctx.fillStyle = gradient;
+		ctx.fillText(headline, 60, 348);
+		ctx.fillStyle = INK.muted;
+		ctx.font = `500 26px ${FONT}`;
+		const change = before ? delta(s.cs.length, before.cs.length) : null;
+		const vs = change == null ? '' : `  ·  ${change >= 0 ? '▲' : '▼'} ${Math.abs(change)}% vs ${before.range}`;
+		ctx.fillText(`${s.cs.length === 1 ? 'commit' : 'commits'}${vs}`, 66, 392);
+
+		// Four stat tiles, right.
+		const topLanguage = Object.entries(s.langs).filter(([l]) => l !== 'Other').sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
+		const p = persona(s);
+		const stats = [
+			['Lines added', num(s.adds)],
+			['Active days', num(s.activeDays.length)],
+			['Longest streak', plural(s.streak.len, 'day')],
+			has.has('requests') ? [`${V.REQS} merged`, num(s.merged.length)] : ['Top language', topLanguage],
+		];
+		stats.forEach(([label, value], i) => {
+			const x = 690 + (i % 2) * 234;
+			const y = 140 + Math.floor(i / 2) * 128;
+			ctx.fillStyle = 'rgba(26,26,25,0.86)';
+			roundRect(ctx, x, y, 218, 112, 18);
+			ctx.fill();
+			ctx.strokeStyle = INK.line;
+			ctx.lineWidth = 1;
+			ctx.stroke();
+			ctx.fillStyle = INK.muted;
+			ctx.font = `500 18px ${FONT}`;
+			ctx.fillText(label, x + 20, y + 38);
+			ctx.fillStyle = INK.ink;
+			fitText(ctx, value, 182, 750, 38);
+			ctx.fillText(value, x + 20, y + 86);
+		});
+		if (p) {
+			ctx.fillStyle = INK.muted;
+			ctx.font = `600 20px ${FONT}`;
+			ctx.fillText(`${p[1]}  ·  mostly ${topLanguage}`, 690, 420);
+		}
+
+		// The last 44 weeks of the range as a calendar strip.
+		const end = s.range === 'all' || s.range === generatedDay.slice(0, 4) ? generatedDay : `${s.range}-12-31`;
+		const weeks = 44, cell = 14, gap = 3;
+		const start = addDays(end, -(weeks * 7 - 1) - weekdayOf(addDays(end, -(weeks * 7 - 1))));
+		const values = [...s.contrib.values()].filter((v) => v > 0).sort((a, b) => a - b);
+		const q = (f) => values[Math.min(values.length - 1, Math.floor(f * values.length))] || 1;
+		const cuts = [q(0.25), q(0.5), q(0.75)];
+		for (let i = 0; ; i++) {
+			const day = addDays(start, i);
+			if (day > end) break;
+			const v = s.contrib.get(day) || 0;
+			const level = !v ? 0 : v <= cuts[0] ? 1 : v <= cuts[1] ? 2 : v <= cuts[2] ? 3 : 4;
+			ctx.fillStyle = LEVELS[level];
+			roundRect(ctx, 64 + Math.floor(i / 7) * (cell + gap), 448 + (i % 7) * (cell + gap), cell, cell, 3);
+			ctx.fill();
+		}
+
+		// Watermark, bottom right: where the card came from.
+		ctx.textAlign = 'right';
+		ctx.fillStyle = INK.ink;
+		ctx.font = `700 22px ${FONT}`;
+		ctx.fillText('made with ghis', CARD.w - 64, 540);
+		ctx.fillStyle = INK.muted;
+		ctx.font = `500 18px ${FONT}`;
+		ctx.fillText(SITE_URL, CARD.w - 64, 570);
+		ctx.textAlign = 'left';
+		drawLogo(ctx, CARD.w - 64 - ctx.measureText(SITE_URL).width - 52, 532, 36, INK.ink, INK.page);
+		return canvas;
+	}
+
+	function drawSharePreview() {
+		const img = $('#share-preview');
+		if (img) img.src = shareCanvas(state).toDataURL('image/png');
+	}
+
+	function download(blob, name) {
+		const a = document.createElement('a');
+		a.href = URL.createObjectURL(blob);
+		a.download = name;
+		document.body.append(a);
+		a.click();
+		a.remove();
+		setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+	}
+
+	const slug = (text) => String(text || 'story').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+	function openShareSafe() {
+		let dialog = $('#share-safe');
+		if (!dialog) {
+			dialog = document.createElement('dialog');
+			dialog.id = 'share-safe';
+			dialog.className = 'dialog';
+			dialog.innerHTML = `<form method="dialog">
+				<h3>Download share-safe data</h3>
+				<p>A copy of this story's data that you can post or send. The numbers stay the same; the private details go.</p>
+				<label class="check"><input type="checkbox" name="messages" checked> Remove commit messages and ${esc(V.req)} titles</label>
+				<label class="check"><input type="checkbox" name="names" checked> Rename repositories and teammates; drop emails, links and the instance name</label>
+				<div class="dialog-actions"><button class="btn" value="cancel">Cancel</button><button class="btn primary" value="download">Download</button></div>
+			</form>`;
+			document.body.append(dialog);
+			dialog.addEventListener('close', () => {
+				if (dialog.returnValue !== 'download') return;
+				const form = dialog.querySelector('form');
+				const safe = anonymize(D, { messages: form.messages.checked, names: form.names.checked });
+				download(new Blob([JSON.stringify(safe)], { type: 'application/json' }), 'history-share-safe.json');
+			});
+		}
+		dialog.returnValue = '';
+		dialog.showModal();
+	}
+
+	document.addEventListener('click', (e) => {
+		const share = e.target.closest?.('[data-share]');
+		if (!share) return;
+		if (share.dataset.share === 'card') {
+			const name = `ghis-${slug(D.user?.username || D.user?.name)}-${state.range}.png`;
+			shareCanvas(state).toBlob((blob) => download(blob, name), 'image/png');
+		} else {
+			openShareSafe();
+		}
+	});
+
+	// For the browser tests: the card for the current view.
+	window.ghisShareCard = () => shareCanvas(state);
 
 	// ------------------------------------------------------------ motion
 

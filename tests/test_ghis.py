@@ -60,6 +60,18 @@ def make_repo(root: Path, name: str) -> Path:
     commit("Move app into src", "ME@Example.com", "2024-03-05T23:30:00+02:00")
     (repo / "other.js").write_text("x\n")
     commit("Someone else's work", "them@example.com", "2024-03-06T09:00:00+02:00")
+    (repo / "pair.js").write_text("pair\n")
+    commit(
+        "Pair on the parser\n\nCo-authored-by: Me <me@example.com>",
+        "them@example.com",
+        "2024-03-07T11:00:00+02:00",
+    )
+    (repo / "thanks.js").write_text("thanks\n")
+    commit(
+        "Credit an idea\n\nThanks to me@example.com for it.",
+        "them@example.com",
+        "2024-03-08T11:00:00+02:00",
+    )
     return repo
 
 
@@ -89,6 +101,24 @@ class Isolated(unittest.TestCase):
 
 
 class HelperTests(unittest.TestCase):
+    def test_activity_is_counted_per_utc_hour(self) -> None:
+        activity: dict = {}
+        for when in (
+            "2024-06-01T01:30:00+02:00",
+            "2024-03-01T09:00:00.000Z",
+            "2024-03-01T09:59:59Z",
+        ):
+            common.bump(activity, when, "commented")
+        common.bump(activity, "2024-01-05", "approved")  # no time: the day stays
+        self.assertEqual(
+            activity,
+            {
+                "2024-05-31T23": {"commented": 1},  # 01:30 at +02:00 is the previous UTC day
+                "2024-03-01T09": {"commented": 2},
+                "2024-01-05": {"approved": 1},
+            },
+        )
+
     def test_parse_remote(self) -> None:
         cases = {
             "git@gitlab.com:group/sub/app.git": ("gitlab.com", "group/sub/app"),
@@ -154,13 +184,25 @@ class CollectTests(Isolated):
 
     def test_scan_repo_matches_author_case_insensitively(self) -> None:
         commits = git.scan_repo(str(self.repo), ["me@example.com"], git.DEFAULT_IGNORE)
-        self.assertEqual(len(commits), 2)
-        subjects = {c["s"] for c in commits}
-        self.assertNotIn("Someone else's work", subjects)
+        authored = [c for c in commits if not c.get("co")]
+        self.assertEqual(len(authored), 2)
+        self.assertNotIn("Someone else's work", {c["s"] for c in commits})
+
+    def test_scan_repo_counts_co_authored_commits_by_trailer_only(self) -> None:
+        commits = git.scan_repo(str(self.repo), ["me@example.com"], git.DEFAULT_IGNORE)
+        co = [c for c in commits if c.get("co")]
+        self.assertEqual([c["s"] for c in co], ["Pair on the parser"])
+        self.assertEqual(co[0]["e"], "them@example.com")  # the author stays the author
+        # Naming your email in a message is not co-authorship.
+        self.assertNotIn("Credit an idea", {c["s"] for c in commits})
 
     def test_scan_repo_skips_lockfile_lines_and_follows_renames(self) -> None:
         first, second = sorted(
-            git.scan_repo(str(self.repo), ["me@example.com"], git.DEFAULT_IGNORE),
+            (
+                c
+                for c in git.scan_repo(str(self.repo), ["me@example.com"], git.DEFAULT_IGNORE)
+                if not c.get("co")
+            ),
             key=lambda c: c["t"],
         )
         self.assertEqual((first["a"], first["f"]), (10, 2))  # lockfile counted as a file only
@@ -174,9 +216,35 @@ class CollectTests(Isolated):
         data = collect_mod.collect(collect_args(local_root=[str(self.root / "code")]), "git", None)
         self.assertEqual(data["schema"], common.SCHEMA_VERSION)
         self.assertEqual([p["path"] for p in data["projects"]], ["team/app"])
-        self.assertEqual(len(data["commits"]), 2)
+        self.assertEqual(len(data["commits"]), 3)  # two authored, one co-authored
         self.assertEqual(data["user"]["name"], "me")
         self.assertEqual(data["source"]["provider"], "git")
+
+    def test_rebased_and_cherry_picked_copies_count_once(self) -> None:
+        repo = make_repo(self.root / "dupes", "dupes")
+        env = {
+            **os.environ,
+            "GIT_COMMITTER_NAME": "Bot",
+            "GIT_COMMITTER_EMAIL": "bot@example.com",
+            "GIT_COMMITTER_DATE": "2025-01-01T00:00:00+00:00",
+        }
+
+        def run(*args: str) -> str:
+            result = subprocess.run(
+                ["git", *args], cwd=repo, check=True, capture_output=True, env=env
+            )
+            return result.stdout.decode().strip()
+
+        # Copy "Move app into src" onto a second branch: a new id, but the same author,
+        # author time and message, exactly as a cherry-pick or a rebase leaves it.
+        original = run("log", "--format=%H", "--grep=Move app into src")
+        run("checkout", "-q", "-b", "copy", run("rev-list", "--max-parents=0", "HEAD"))
+        run("cherry-pick", original)
+        self.assertNotEqual(run("rev-parse", "HEAD"), original)
+
+        args = collect_args(local_root=[str(self.root / "dupes")])
+        subjects = [c["s"] for c in collect_mod.collect(args, "git", None)["commits"]]
+        self.assertEqual(subjects.count("Move app into src"), 1)
 
     def test_collect_needs_something_to_read(self) -> None:
         with self.assertRaises(common.CollectError):
@@ -203,7 +271,7 @@ class CollectTests(Isolated):
         # make_repo commits as "Someone" with two addresses; both are found, case-folded.
         self.assertEqual(
             {e["email"]: e["commits"] for e in found["emails"]},
-            {"me@example.com": 2, "them@example.com": 1},
+            {"me@example.com": 2, "them@example.com": 3},
         )
 
     def test_suggest_url_reads_instance_from_remotes(self) -> None:

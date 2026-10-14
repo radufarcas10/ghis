@@ -217,6 +217,9 @@ def collect(args: argparse.Namespace, provider: str, token: str | None) -> dict[
     log(f"Reading commits from {len(targets)} repositories...")
     ignore = () if args.count_all_files else DEFAULT_IGNORE
     author_emails = sorted(emails)
+    # One change can carry several ids: a fork shares it, but a rebase or a cherry-pick copies
+    # it under a new one. Copies keep the author, the author time and the message, so those
+    # identify a change alongside its id.
     seen: set[str] = set()
     per_project: dict[str, list[dict[str, Any]]] = {}
 
@@ -232,8 +235,12 @@ def collect(args: argparse.Namespace, provider: str, token: str | None) -> dict[
             if error:
                 warnings.append(f"Could not read {projects[key]['path']}: {error}")
                 continue
-            unique = [c for c in found if c["h"] not in seen]
-            seen.update(c["h"] for c in unique)
+            unique = []
+            for c in found:
+                keys = (c["h"], f"{c['t']}\x1f{c['e']}\x1f{c['s']}")
+                if not any(k in seen for k in keys):
+                    seen.update(keys)
+                    unique.append(c)
             per_project.setdefault(key, []).extend(unique)
 
     request_paths = {r["project"].lower() for r in api["requests"] + api["reviews"]}

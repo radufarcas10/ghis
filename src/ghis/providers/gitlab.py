@@ -48,6 +48,7 @@ def gitlab_request(mr: dict[str, Any]) -> dict[str, Any]:
         "closedAt": mr.get("closed_at"),
         "notes": mr.get("user_notes_count") or 0,
         "author": (mr.get("author") or {}).get("username"),
+        "reviewers": [u["username"] for u in mr.get("reviewers") or [] if u.get("username")],
         "url": mr.get("web_url"),
     }
 

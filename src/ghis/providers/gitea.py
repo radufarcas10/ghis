@@ -51,6 +51,7 @@ def gitea_request(issue: dict[str, Any]) -> dict[str, Any]:
         "closedAt": issue.get("closed_at") if state == "closed" else None,
         "notes": issue.get("comments") or 0,
         "author": (issue.get("user") or {}).get("login"),
+        "reviewers": [],  # the issue search has no reviewers; fetching each pull would cost a call
         "url": issue.get("html_url"),
     }
 

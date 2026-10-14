@@ -27,7 +27,19 @@ CHROME = os.environ.get("GHIS_CHROME") or next(
     ),
     None,
 )
-SECTIONS = ("calendar", "months", "rhythm", "repos", "languages", "requests", "highlights", "words")
+SECTIONS = (
+    "calendar",
+    "months",
+    "rhythm",
+    "repos",
+    "languages",
+    "requests",
+    "people",
+    "highlights",
+    "milestones",
+    "words",
+    "share",
+)
 
 
 def render(url: str) -> str:
