@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghis"
+dynamic = ["version"]
+description = "Your git history, told beautifully: an animated story of your commits, pull requests and reviews."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Radu Farcas" }]
+requires-python = ">=3.9"
+dependencies = []
+keywords = ["git", "github", "gitlab", "codeberg", "statistics", "visualization", "developer-tools"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Version Control :: Git",
+]
+
+[project.scripts]
+ghis = "ghis.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "ghis.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ghis = ["web/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP"]
+ignore = [
+    "UP007",  # `X | None` in annotations already works on 3.9 via `from __future__ import annotations`
+    "UP045",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ghis"]

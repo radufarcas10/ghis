@@ -1,0 +1,15 @@
+services:
+  ghis:
+    build: .
+    image: ghis:latest
+    ports:
+      - "8080:8080"
+    environment:
+      # Hosts this server may call. Add your self-hosted instance, or use * on a private network.
+      GHIS_ALLOWED_HOSTS: "github.com,gitlab.com,codeberg.org,bitbucket.org,git.sr.ht"
+      GHIS_MAX_JOBS: "2"
+      GHIS_TTL_MINUTES: "60"
+    tmpfs:
+      - /tmp:size=4g
+    read_only: true
+    restart: unless-stopped

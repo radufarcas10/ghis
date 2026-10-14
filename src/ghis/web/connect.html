@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="color-scheme" content="light dark">
+	<meta name="referrer" content="no-referrer">
+	<meta name="description" content="Turn your commits, pull requests and reviews into an animated story.">
+	<title>ghis</title>
+	<link rel="icon" href="favicon.svg" type="image/svg+xml">
+	<link rel="stylesheet" href="style.css">
+	<script src="theme.js"></script>
+</head>
+<body>
+	<header class="bar">
+		<a class="brand" href="./" aria-label="ghis home">
+			<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="currentColor"/><g fill="var(--page)"><rect x="6" y="18" width="5" height="8" rx="1.5"/><rect x="13.5" y="11" width="5" height="15" rx="1.5"/><rect x="21" y="6" width="5" height="20" rx="1.5"/></g></svg>
+			ghis
+		</a>
+		<span class="bar-spacer"></span>
+		<a class="btn small" href="story?demo=github">See a demo</a>
+		<button class="icon-btn" type="button" data-theme-toggle aria-label="Switch light or dark theme">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
+		</button>
+	</header>
+
+	<main class="connect">
+		<section class="hero">
+			<h1>Your code,<br><em>told beautifully.</em></h1>
+			<p class="lead">ghis reads your commits, pull requests and reviews from GitHub, GitLab, Codeberg or any git host, and turns them into an animated story of everything you've built.</p>
+			<p class="mode-chip" id="mode" hidden></p>
+			<div class="preview" id="preview" aria-hidden="true"></div>
+		</section>
+
+		<div class="panel" id="panel">
+			<form id="form" novalidate>
+				<div class="providers" role="radiogroup" aria-label="Where your code lives" id="providers"></div>
+
+				<ul class="detect" id="detect" aria-live="polite" hidden></ul>
+
+				<div class="field" id="f-url">
+					<label for="url">Instance URL</label>
+					<input class="input" id="url" name="url" type="url" inputmode="url" autocomplete="url" spellcheck="false">
+					<span class="hint" id="url-hint"></span>
+				</div>
+
+				<div class="field" id="f-repos" hidden>
+					<label for="repos">Repository URLs</label>
+					<textarea class="input" id="repos" name="repos" spellcheck="false" placeholder="https://bitbucket.org/team/app.git&#10;https://git.sr.ht/~you/project"></textarea>
+					<span class="hint" id="repos-hint">One HTTPS clone URL per line, on any host git can clone from.</span>
+				</div>
+
+				<div class="field" id="f-token">
+					<label for="token" id="token-label">Access token</label>
+					<input class="input" id="token" name="token" type="password" autocomplete="off" spellcheck="false">
+					<span class="hint" id="token-hint"></span>
+					<details class="help" id="token-help">
+						<summary>How do I get a token?</summary>
+						<ol id="token-steps"></ol>
+					</details>
+				</div>
+
+				<div class="row" id="f-git-extra" hidden>
+					<div class="field">
+						<label for="name">Your name</label>
+						<input class="input" id="name" name="name" autocomplete="name">
+					</div>
+					<div class="field">
+						<label for="clone-user">HTTPS username</label>
+						<input class="input" id="clone-user" name="cloneUser" placeholder="git" autocomplete="off" spellcheck="false">
+					</div>
+				</div>
+
+				<div class="field">
+					<label for="emails" id="emails-label">Other emails you commit with</label>
+					<input class="input" id="emails" name="emails" type="text" inputmode="email" autocomplete="email" spellcheck="false" placeholder="me@work.com, me@home.net">
+					<span class="hint" id="emails-hint">Commits are matched by author email. Your account's emails are added automatically.</span>
+				</div>
+
+				<div class="field" id="f-folders" hidden>
+					<label for="folders">Folders on this computer <span class="optional">optional</span></label>
+					<textarea class="input" id="folders" name="folders" spellcheck="false"></textarea>
+					<span class="hint">One per line. Leave empty to search your whole home folder. Checkouts found are read in place instead of being cloned, which is faster and covers repositories that are not online.</span>
+				</div>
+
+				<div class="form-actions">
+					<button class="btn primary" type="submit" id="submit">Create my story</button>
+				</div>
+				<div class="error" id="error" role="alert" hidden></div>
+
+				<p class="privacy">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+					<span id="privacy-text">Your token is used once, held in memory only and never written to disk. Clones are deleted when the story is ready.</span>
+				</p>
+			</form>
+
+			<div class="drop" id="drop">
+				Already ran the CLI? Drop a <code>history.json</code> here or <label for="file" style="text-decoration:underline;cursor:pointer">choose a file</label>.
+				<input type="file" id="file" accept="application/json,.json" class="sr-only">
+			</div>
+		</div>
+
+		<section class="how" aria-labelledby="how-title">
+			<h2 id="how-title">How it works</h2>
+			<ol class="steps">
+				<li><b>Pick where your code lives</b><span>GitHub, GitLab, Codeberg, or any git host by URL.</span></li>
+				<li><b>Paste an access token</b><span>ghis uses it only to read your repositories, pull requests and reviews through the host's API.</span></li>
+				<li><b>ghis clones and reads</b><span>Every repository you committed to, matched by your author email. Large accounts take a few minutes.</span></li>
+				<li><b>Enjoy your story</b><span>Filter by year, hover anything for details, download the data or print it as a PDF.</span></li>
+			</ol>
+		</section>
+
+		<div class="features">
+			<div class="feature"><b>Every commit, every repo</b><p>Real clones, real diffs: lines, languages, files and your biggest moments.</p></div>
+			<div class="feature"><b>Your rhythm</b><p>A day-by-day calendar, streaks and the hours you actually write code.</p></div>
+			<div class="feature"><b>Collaboration</b><p>Pull and merge requests, time to merge, reviews, approvals and comments.</p></div>
+			<div class="feature"><b>Local first</b><p>Prefer your own machine? <code>python3 ghis.py collect</code> builds the same page offline.</p></div>
+		</div>
+	</main>
+
+	<script src="connect.js"></script>
+</body>
+</html>

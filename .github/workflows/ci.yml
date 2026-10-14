@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # Includes the headless-Chrome tests: GitHub's Ubuntu runners ship Chrome.
+      - run: python -m unittest discover tests -v
+
+  javascript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: for f in src/ghis/web/*.js site/*.js; do node --check "$f"; done
+      - run: node --test tests/js/*.test.js
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install .
+      - name: The installed command works outside the checkout
+        run: |
+          cd "$RUNNER_TEMP"
+          ghis --version
+          ghis demo --out story
+          test -s story/index.html && test -s story/lib.js
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t ghis:ci .
+      - name: Smoke test
+        run: |
+          docker run -d --name ghis -p 8080:8080 --read-only --tmpfs /tmp ghis:ci
+          for i in $(seq 1 20); do curl -fs localhost:8080/healthz && break; sleep 1; done
+          curl -fs localhost:8080/ | grep -q "told beautifully"
+          curl -fs "localhost:8080/api/demo?provider=gitlab" | grep -q '"schema"'

@@ -1,0 +1,13 @@
+# Generated stories and clones contain your (or your employer's) private data.
+out/
+out-*/
+cache/
+*.token
+
+# Build and tooling output
+_site/
+build/
+dist/
+*.egg-info/
+__pycache__/
+.ruff_cache/
