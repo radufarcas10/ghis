@@ -9,7 +9,7 @@ what makes `python3 ghis.py` work on any machine with nothing to install.
 ```bash
 git clone <this repo> && cd ghis
 python3 ghis.py demo --open     # sample story, no account needed
-python3 ghis.py                  # the app, on http://localhost:8080 (or the next free port)
+python3 ghis.py                  # the app, on http://ghis.localhost:8080 (or the next free port)
 ```
 
 Requirements: Python 3.9+ and git 2.31+. The development tools below are optional extras.

@@ -355,7 +355,7 @@
 	// ------------------------------------------------------------ boot
 
 	if (location.protocol === 'file:') {
-		showError('This page needs the ghis server: run `python3 ghis.py serve` and open http://localhost:8080.');
+		showError('This page needs the ghis server: run `python3 ghis.py serve` and open http://ghis.localhost:8080.');
 		$('#submit').disabled = true;
 		return;
 	}

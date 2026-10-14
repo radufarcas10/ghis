@@ -328,9 +328,11 @@ class ServerTests(Isolated):
             self.request(port, "GET", "/api/config", None, {"Host": "attacker.example:8080"})[0],
             403,
         )
-        self.assertEqual(
-            self.request(port, "GET", "/api/config", None, {"Host": "localhost:8080"})[0], 200
-        )
+        for name in ("localhost:8080", "ghis.localhost:8080", "[::1]:8080"):
+            self.assertEqual(self.request(port, "GET", "/api/config", None, {"Host": name})[0], 200)
+        # Look-alikes that DNS could point anywhere stay out.
+        for name in ("localhost.attacker.example", "ghislocalhost:8080", "evil.example"):
+            self.assertEqual(self.request(port, "GET", "/api/config", None, {"Host": name})[0], 403)
 
 
 if __name__ == "__main__":

@@ -31,8 +31,9 @@ server). You should get a reply within a week.
 
 **Personal mode** (`python3 ghis.py`, bound to localhost)
 - Can read folders on your computer and clone with your SSH keys, so it answers only to
-  requests addressed to `localhost`, `127.0.0.1` or `[::1]`. That blocks DNS-rebinding
-  pages, and the cross-site checks above stop other websites from starting jobs.
+  requests addressed to `localhost`, `*.localhost` (such as `ghis.localhost`, which
+  browsers always resolve to this computer), `127.0.0.1` or `[::1]`. That blocks
+  DNS-rebinding pages, and the cross-site checks above stop other websites from starting jobs.
 
 ## Out of scope
 

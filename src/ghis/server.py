@@ -123,6 +123,7 @@ def list_field(payload: dict[str, Any], key: str, limit: int, item_limit: int) -
 
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+PRETTY_HOST = "ghis.localhost"
 
 
 class GhisServer:
@@ -391,11 +392,13 @@ def make_handler(app: GhisServer) -> type[BaseHTTPRequestHandler]:
         def host_ok(self) -> bool:
             # A personal server reads local folders, so it must only answer to names that
             # mean this computer: a web page using DNS rebinding arrives with its own name.
+            # *.localhost (ghis.localhost) qualifies: browsers resolve it to loopback
+            # themselves (RFC 6761), so no DNS answer can point it anywhere else.
             if not app.personal:
                 return True
             host = (self.headers.get("Host") or "").lower()
             name = host.rsplit(":", 1)[0] if not host.startswith("[") else host.split("]")[0] + "]"
-            return name in ("localhost", "127.0.0.1", "[::1]")
+            return name in ("localhost", "127.0.0.1", "[::1]") or name.endswith(".localhost")
 
         def same_origin(self) -> bool:
             # Browsers send Origin on cross-site POSTs; a page elsewhere may not start jobs.
@@ -506,9 +509,13 @@ def serve(args: argparse.Namespace) -> None:
     if port != first:
         log(f"Port {first} is busy (another program is using it), so ghis is using {port}.")
     httpd.daemon_threads = True
-    url = f"http://{'localhost' if app.personal else args.host}:{port}/"
+    url = f"http://{args.host}:{port}/"
     if app.personal:
-        log(f"ghis is running at {url}  (personal mode: local folders and ssh enabled)")
+        # ghis.localhost needs no setup: Chrome, Firefox and Edge send every *.localhost name
+        # to this computer. Safari leaves it to macOS, which doesn't, so on a Mac the browser
+        # opens plain localhost.
+        url = f"http://{'localhost' if sys.platform == 'darwin' else PRETTY_HOST}:{port}/"
+        log(f"ghis is running at {url}  (also http://localhost:{port}/)")
     else:
         log(f"ghis is serving on {url}  (allowed hosts: {', '.join(sorted(app.allowed))})")
     log("Press Ctrl+C to stop.")

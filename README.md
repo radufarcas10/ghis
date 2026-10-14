@@ -23,7 +23,8 @@ cd ghis
 python3 ghis.py
 ```
 
-Your browser opens at <http://localhost:8080>, or the next free port if another app uses 8080:
+Your browser opens at <http://ghis.localhost:8080>, or the next free port if another app uses 8080.
+(On a Mac it opens <http://localhost:8080>: Safari does not resolve `.localhost` names.)
 
 ![The app](docs/app.png)
 
