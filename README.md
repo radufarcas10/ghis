@@ -72,6 +72,8 @@ Press `Ctrl+C` in the terminal to stop ghis.
   messages or emails on it. **Share-safe data** gives a copy of the whole story with messages
   removed and repositories and teammates renamed.
 
+![A share card: name, commits this year against last year, lines added, active days, longest streak, merged pull requests and a calendar strip, with the ghis watermark](docs/share-card.png)
+
 ## Where it can read from
 
 | Source | Adds on top of commits | Token scopes |
