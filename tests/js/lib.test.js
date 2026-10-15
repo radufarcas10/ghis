@@ -98,16 +98,20 @@ test('compute: streaks, busiest day, repositories and languages', () => {
 	assert.equal(model.langColors.get('Python'), 'var(--s2)');
 });
 
-test('compute: tickets and vocabulary skip noise words and stray punctuation', () => {
+test('compute: tickets are real tracker keys, not things shaped like them', () => {
 	const model = lib.createModel({
 		commits: [
 			commit('2024-01-01T10:00:00Z', { s: "APP-12 Fix the checkout' flow" }),
-			commit('2024-01-02T10:00:00Z', { s: 'APP-12 checkout tweaks for CORE-7' }),
+			commit('2024-01-02T10:00:00Z', { s: 'APP-14 checkout tweaks, see CORE-7' }),
+			commit('2024-01-03T10:00:00Z', { s: 'CORE-9 Read files as UTF-8, hash with SHA-256' }),
+			commit('2024-01-04T10:00:00Z', { s: 'Dates in ISO-8601, patch CVE-2021-44228, bump TOOL-3' }),
 		],
-		requests: [{ title: 'OPS-3 Deploy', createdAt: '2024-01-03T00:00:00Z', state: 'opened' }],
+		requests: [{ title: 'OPS-3 Deploy', createdAt: '2024-01-05T00:00:00Z', state: 'opened' }],
 	});
 	const s = model.compute('all');
-	assert.deepEqual([...s.tickets].sort(), ['APP-12', 'CORE-7', 'OPS-3']);
+	// APP and CORE recur with different numbers; UTF, SHA, ISO and CVE are never tickets;
+	// TOOL and OPS appear once each, too little to call them a tracker.
+	assert.deepEqual([...s.tickets].sort(), ['APP-12', 'APP-14', 'CORE-7', 'CORE-9']);
 	assert.equal(s.words.checkout, 2);
 	assert.equal(s.words.fix, undefined); // a stop word
 	assert.equal(s.words['checkout\''], undefined);
@@ -288,6 +292,13 @@ test('anonymize keeps the numbers and drops what was asked', () => {
 	assert.equal(safe.commits[0].a, data.commits[0].a);
 	assert.deepEqual(safe.source.shareSafe, { messages: true, names: true });
 	assert.equal(data.projects[0].path, 'acme/web'); // the original is untouched
+
+	const covered = lib.anonymize({
+		...data,
+		coverage: { repos: [{ path: 'acme/web', via: 'local', commits: 5 }], skipped: [{ path: 'acme/api', reason: 'could not be cloned: auth failed for gitlab.corp.example' }], excludedEmails: ['bob@corp.example'], limits: [] },
+	});
+	assert.deepEqual(covered.coverage.repos.map((r) => r.path), ['Project A']);
+	assert.ok(!JSON.stringify(covered.coverage).includes('corp.example'));
 
 	const namesOnly = lib.anonymize(data, { messages: false, names: true });
 	assert.equal(namesOnly.commits[0].s, 'APP-1 secret plan');

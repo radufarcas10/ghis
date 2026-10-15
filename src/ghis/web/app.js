@@ -266,6 +266,7 @@
 			highlightsSection(s),
 			milestonesSection(s),
 			wordsSection(s),
+			coverageSection(),
 			shareSection(s),
 			footer(),
 		].join('');
@@ -545,6 +546,54 @@
 			return `<li style="--i:${i}"><span class="ms-icon" aria-hidden="true">${icon}</span><div><time datetime="${m.day}">${fmtDay(m.day)}</time><b>${title}</b><span>${detail}</span></div></li>`;
 		}).join('');
 		return section('milestones', 'Milestones', 'Along the way', '', `<ol class="timeline">${rows}</ol>`);
+	}
+
+	// What went into the story and what could not, for the whole history whatever the filters.
+	function coverageSection() {
+		const src = D.source || {};
+		const cov = D.coverage || {};
+		const repos = (cov.repos || []).slice().sort((a, b) => b.commits - a.commits);
+		const profile = src.provider === 'git' || !src.provider ? 'GitHub, GitLab or Codeberg' : V.host;
+		const disclaimer = `<p class="callout"><span aria-hidden="true">ⓘ</span><span><b>This is not your ${esc(profile)} profile.</b>
+			ghis counts what it can read: every branch of the repositories below, co-authored commits included,
+			copies counted once. Profiles count differently (often the default branch only, often the last year
+			only) and include work in repositories ghis never saw, so the numbers will not match exactly.</span></p>`;
+
+		const perEmail = {};
+		for (const c of model.commits) if (!c.co && c.e) perEmail[c.e] = (perEmail[c.e] || 0) + 1;
+		const emails = (src.emails || []).map((e) => `<li><span class="who">${esc(e)}</span><span class="n">${plural(perEmail[e] || 0, 'commit')}</span></li>`).join('');
+
+		const how = { local: 'Local checkout', clone: 'Cloned', api: 'API only' };
+		const fetched = (r) => {
+			if (r.via === 'api') return '—';
+			if (r.via === 'clone') return 'fresh';
+			if (!r.fetchedAt) return 'never fetched';
+			const day = r.fetchedAt.slice(0, 10);
+			return daysBetween(day, generatedDay) > 30 ? `${fmtDay(day)} · may be out of date` : fmtDay(day);
+		};
+		const row = (r) => `<tr><td>${esc(r.path)}</td><td>${how[r.via] || esc(r.via)}</td><td class="n">${num(r.commits)}</td><td class="${r.via === 'local' && (!r.fetchedAt || daysBetween(r.fetchedAt.slice(0, 10), generatedDay) > 30) ? 'warn' : ''}">${fetched(r)}</td></tr>`;
+		const head = '<thead><tr><th scope="col">Repository</th><th scope="col">Read from</th><th class="n" scope="col">Commits</th><th scope="col">Last fetched</th></tr></thead>';
+		const table = repos.length
+			? `<div class="table-wrap"><table>${head}<tbody>${repos.slice(0, 8).map(row).join('')}</tbody></table></div>
+				${repos.length > 8 ? `<details class="table"><summary>Show all ${num(repos.length)}</summary><div class="table-wrap"><table>${head}<tbody>${repos.slice(8).map(row).join('')}</tbody></table></div></details>` : ''}`
+			: '<p class="empty-note">No repository details in this file.</p>';
+
+		const missing = [
+			...(cov.limits || []).map(esc),
+			...(cov.skipped || []).map((r) => `<b>${esc(r.path)}</b> ${esc(r.reason)}.`),
+			...(cov.excludedEmails || []).map((e) => `Left out at your request: <b>${esc(e)}</b>.`),
+		];
+		const withCommits = repos.filter((r) => r.commits).length;
+		const scanned = cov.scanned ? `ghis read ${plural(cov.scanned, 'repository', 'repositories')}; ${num(withCommits)} of them had commits of yours.` : '';
+		return section('coverage', 'Coverage', 'What this story covers', scanned,
+			`${disclaimer}
+			<div class="coverage">
+				<div><p class="kicker">Repositories</p>${table}</div>
+				<div>
+					<p class="kicker">Emails matched</p><ul class="emails">${emails || '<li>None recorded</li>'}</ul>
+					${missing.length ? `<p class="kicker" style="margin-top:22px">Not included</p><ul class="missing">${missing.map((m) => `<li>${m}</li>`).join('')}</ul>` : ''}
+				</div>
+			</div>`);
 	}
 
 	function shareSection() {

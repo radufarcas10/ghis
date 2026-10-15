@@ -93,6 +93,18 @@
 		});
 	}
 
+	// Links to a question (#match) open its answer.
+	const openFromHash = () => {
+		const target = location.hash && document.getElementById(location.hash.slice(1));
+		const item = faqs.find((f) => f.details === target);
+		if (item && !item.details.open) {
+			for (const other of faqs) if (other !== item && other.details.open) collapse(other);
+			expand(item);
+		}
+	};
+	addEventListener('hashchange', openFromHash);
+	openFromHash();
+
 	const sections = document.querySelectorAll('.reveal');
 	if (matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) {
 		sections.forEach((el) => el.classList.add('in'));

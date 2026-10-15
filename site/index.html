@@ -100,6 +100,14 @@
 				},
 				{
 					"@type": "Question",
+					"name": "Will the numbers match my GitHub profile?",
+					"acceptedAnswer": {
+						"@type": "Answer",
+						"text": "Not exactly, and that is expected. ghis counts every branch of the repositories it can read, co-authored commits included, and counts rebased or cherry-picked copies once. Profiles count differently, often only the default branch and only the last year, and include work in repositories ghis never saw. Every story ends with a list of exactly what it covers."
+					}
+				},
+				{
+					"@type": "Question",
 					"name": "Do I need a token?",
 					"acceptedAnswer": {
 						"@type": "Answer",
@@ -199,6 +207,7 @@
 				<article class="feature"><span class="f-icon" aria-hidden="true">🔥</span><h3>Highlights</h3><p>Your first commit, your biggest one, tickets touched and the words you reach for most.</p></article>
 				<article class="feature"><span class="f-icon" aria-hidden="true">✨</span><h3>Made to share</h3><p>Filter by year or repository, compare with last year, then download an image of your highlights that's safe to post.</p></article>
 			</div>
+			<p class="fine">ghis counts what it can read from your repositories, so its numbers will not match your GitHub, GitLab or Codeberg profile exactly. <a href="#match">Why?</a></p>
 		</section>
 
 		<section class="block reveal" id="start">
@@ -257,6 +266,7 @@ ghis</code></pre>
 			<h2>Questions</h2>
 			<div class="faq">
 				<details><summary>Which commits count as mine?</summary><div class="answer"><p>Commits whose author email is one of yours. ghis finds them on its own: your account's emails, plus every address you committed with under your git name. You can add more.</p></div></details>
+				<details id="match"><summary>Will the numbers match my GitHub profile?</summary><div class="answer"><p>Not exactly, and that is expected. ghis counts every branch of the repositories it can read, co-authored commits included, and counts rebased or cherry-picked copies once. Profiles count differently, often only the default branch and only the last year, and include work in repositories ghis never saw. Every story ends with a list of exactly what it covers.</p></div></details>
 				<details><summary>Do I need a token?</summary><div class="answer"><p>No. Without one, ghis reads the repositories already on your computer. With a token it also includes pull or merge requests, reviews, repositories you never cloned and, on GitLab and Codeberg, your comments. If the <code>gh</code> or <code>glab</code> CLI is signed in, ghis uses that.</p></div></details>
 				<details><summary>Does it work with my company's GitLab?</summary><div class="answer"><p>Yes. Self-managed GitLab, GitHub Enterprise Server, Forgejo and Gitea all work. ghis even reads your instance from the remotes of the repositories you have checked out.</p></div></details>
 				<details><summary>Why don't my line counts include everything?</summary><div class="answer"><p>Lockfiles, build output, vendored code and snapshots are left out, so one <code>npm install</code> doesn't outweigh a year of work. Pass <code>--count-all-files</code> to include them.</p></div></details>

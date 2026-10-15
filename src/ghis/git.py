@@ -11,6 +11,7 @@ import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -371,6 +372,19 @@ def scan_repo(repo: str, emails: list[str], ignore: tuple[str, ...]) -> list[dic
             commit["co"] = 1
             co_authored.append(commit)
     return authored + co_authored
+
+
+def last_fetch(repo: str) -> str | None:
+    """When a checkout last fetched from its remote (FETCH_HEAD's time), or None if never:
+    the story can only be as current as that."""
+    try:
+        common = git(["-C", repo, "rev-parse", "--git-common-dir"]).strip()
+    except GitError:
+        return None
+    head = Path(repo) / common / "FETCH_HEAD"
+    if not head.is_file():
+        return None
+    return datetime.fromtimestamp(head.stat().st_mtime, timezone.utc).isoformat(timespec="seconds")
 
 
 def check_git() -> None:

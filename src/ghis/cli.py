@@ -105,6 +105,13 @@ def main() -> None:
         "--email", action="append", default=[], help="extra author email to match; repeatable"
     )
     collect.add_argument(
+        "--exclude-email",
+        action="append",
+        default=[],
+        help="an email that is not yours, to leave out (e.g. a teammate with your name); "
+        "repeatable",
+    )
+    collect.add_argument(
         "--local-root",
         action="append",
         default=[],

@@ -98,6 +98,10 @@ How it counts:
 - **Bulk changes** (an import, a vendored library, a formatter run) are commits bigger than
   2,000 lines and 40 times your typical commit. They count as commits, but their lines are
   left out of line totals and languages, and the story lists them separately.
+- **It won't match your GitHub, GitLab or Codeberg profile exactly.** Profiles count
+  differently, often only the default branch and only the last year, and include repositories
+  ghis never saw. Every story ends with **What this story covers**: each repository and how
+  current it is, the emails matched, and anything left out.
 - **Times** are shown in the timezone you committed from. Review and comment activity is moved
   into that same timezone, so it lands on the right day.
 - Clones are cached in `cache/`, so the second run only fetches what changed.
@@ -122,6 +126,7 @@ Useful flags (all are listed under `python3 ghis.py collect --help`):
 | Flag | Does |
 |---|---|
 | `--email ADDR` | add an author email to match (repeatable) |
+| `--exclude-email ADDR` | leave out an email that isn't yours, e.g. a teammate who shares your git name (repeatable) |
 | `--local-root DIR` | read checkouts under `DIR` in place instead of cloning (repeatable) |
 | `--clone-via https` | clone with the token instead of your SSH keys (default: `ssh`) |
 | `--all-member-projects` | include every repository you can access, not just the ones you contributed to |

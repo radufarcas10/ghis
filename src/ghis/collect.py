@@ -22,6 +22,7 @@ from .git import (
     clone_env,
     clone_url,
     git,
+    last_fetch,
     parse_remote,
     scan_repo,
     sync_clone,
@@ -141,6 +142,10 @@ def collect(args: argparse.Namespace, provider: str, token: str | None) -> dict[
         except GitError:
             pass
     emails.discard("")
+    # Addresses the user unticked (a teammate who shares their git name, an old shared
+    # machine) stay out, wherever they came from: detected, typed or the API.
+    excluded = {e.strip().lower() for e in getattr(args, "exclude_email", None) or [] if e.strip()}
+    emails -= excluded
     if not emails:
         die("No author email to match commits against; add the email(s) you commit with.")
     if not user.get("name"):
@@ -169,10 +174,11 @@ def collect(args: argparse.Namespace, provider: str, token: str | None) -> dict[
                 "source": "local",
             }
         targets.append((key, repo["dir"]))
+    local_keys = {k for k, _ in targets}
+    skipped: list[dict[str, str]] = []
 
     cloned = 0
     if not args.no_clone:
-        local_keys = {k for k, _ in targets}
         to_clone = [
             (k, p)
             for k, p in projects.items()
@@ -184,6 +190,9 @@ def collect(args: argparse.Namespace, provider: str, token: str | None) -> dict[
                 for _, p in to_clone
                 if not host_allowed(parse_remote(clone_url(p, args.clone_via) or "")[0], allowed)
             ]
+            skipped.extend(
+                {"path": p, "reason": "on a host this server may not contact"} for p in refused
+            )
             if refused:
                 warnings.append(
                     f"Skipped {len(refused)} repositories on hosts this server "
@@ -212,6 +221,7 @@ def collect(args: argparse.Namespace, provider: str, token: str | None) -> dict[
                         log(f"  [{done}/{len(to_clone)}] {name}")
                     else:
                         warnings.append(f"Could not clone {name}: {error}")
+                        skipped.append({"path": name, "reason": f"could not be cloned: {error}"})
                         log(f"  [{done}/{len(to_clone)}] {name} FAILED: {error}")
 
     log(f"Reading commits from {len(targets)} repositories...")
@@ -234,6 +244,9 @@ def collect(args: argparse.Namespace, provider: str, token: str | None) -> dict[
         for key, found, error in pool.map(scan, targets):
             if error:
                 warnings.append(f"Could not read {projects[key]['path']}: {error}")
+                skipped.append(
+                    {"path": projects[key]["path"], "reason": f"could not be read: {error}"}
+                )
                 continue
             unique = []
             for c in found:
@@ -253,9 +266,51 @@ def collect(args: argparse.Namespace, provider: str, token: str | None) -> dict[
     commits.sort(key=lambda c: datetime.fromisoformat(c["t"]))
     log(f"  {len(commits)} commits across {sum(1 for k in kept if per_project.get(k))} repos")
 
+    generated = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    # What the story covers, for the page's "What this story covers" section: how each
+    # repository was read and how current it is, what was skipped, what the host lacks.
+    dirs = dict(targets)
+    coverage_repos = []
+    for key in kept:
+        if key not in dirs:
+            via, fetched = "api", None  # only pull/merge requests or reviews
+        elif key in local_keys:
+            via, fetched = "local", last_fetch(dirs[key])
+        else:
+            via, fetched = "clone", generated
+        coverage_repos.append(
+            {
+                "path": projects[key]["path"],
+                "via": via,
+                "commits": len(per_project.get(key, [])),
+                "fetchedAt": fetched,
+            }
+        )
+    limits = []
+    if not uses_api:
+        limits.append(
+            "No hosting API was used, so pull or merge requests, reviews and comments "
+            "are not included, nor repositories you never cloned."
+        )
+    elif provider == "github":
+        limits.append(
+            "GitHub's API does not expose your comment history, so comments are not counted."
+        )
+    elif provider == "gitea":
+        limits.append(
+            "Codeberg, Forgejo and Gitea do not list who reviewed your pull requests, "
+            "so People shows only whom you reviewed."
+        )
+    elif provider == "gitlab" and api["activity"]:
+        oldest = min(api["activity"])[:10]
+        limits.append(
+            f"GitLab keeps activity events since {oldest}: reviews and comments before "
+            "it are not counted. Commits are unaffected."
+        )
+
     data = {
         "schema": SCHEMA_VERSION,
-        "generatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "generatedAt": generated,
         "source": {
             "provider": provider,
             "label": PROVIDERS[provider]["label"],
@@ -275,6 +330,13 @@ def collect(args: argparse.Namespace, provider: str, token: str | None) -> dict[
         "requests": api["requests"],
         "reviews": api["reviews"],
         "activity": api["activity"],
+        "coverage": {
+            "repos": coverage_repos,
+            "scanned": len(targets),
+            "skipped": skipped,
+            "limits": limits,
+            "excludedEmails": sorted(excluded),
+        },
         "warnings": warnings,
     }
     for warning in warnings:

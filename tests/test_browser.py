@@ -38,6 +38,7 @@ SECTIONS = (
     "highlights",
     "milestones",
     "words",
+    "coverage",
     "share",
 )
 

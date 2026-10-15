@@ -298,6 +298,33 @@ class CollectTests(Isolated):
         subjects = [c["s"] for c in collect_mod.collect(args, "git", None)["commits"]]
         self.assertEqual(subjects.count("Move app into src"), 1)
 
+    def test_coverage_says_how_each_repository_was_read(self) -> None:
+        data = collect_mod.collect(collect_args(local_root=[str(self.root / "code")]), "git", None)
+        cov = data["coverage"]
+        self.assertEqual(cov["scanned"], 1)
+        self.assertEqual(
+            cov["repos"], [{"path": "team/app", "via": "local", "commits": 3, "fetchedAt": None}]
+        )  # a checkout that was never fetched says so
+        self.assertIn("No hosting API was used", cov["limits"][0])
+
+    def test_last_fetch_reads_fetch_head(self) -> None:
+        self.assertIsNone(git.last_fetch(str(self.repo)))
+        head = self.repo / ".git" / "FETCH_HEAD"
+        head.write_text("")
+        self.addCleanup(head.unlink)
+        self.assertRegex(git.last_fetch(str(self.repo)), r"^\d{4}-\d\d-\d\dT")
+
+    def test_excluded_emails_stay_out(self) -> None:
+        args = collect_args(
+            local_root=[str(self.root / "code")],
+            email=["me@example.com", "them@example.com"],
+            exclude_email=["them@example.com"],
+        )
+        data = collect_mod.collect(args, "git", None)
+        self.assertEqual(data["source"]["emails"], ["me@example.com"])
+        self.assertEqual(data["coverage"]["excludedEmails"], ["them@example.com"])
+        self.assertNotIn("them@example.com", {c["e"] for c in data["commits"] if not c.get("co")})
+
     def test_collect_needs_something_to_read(self) -> None:
         with self.assertRaises(common.CollectError):
             collect_mod.collect(collect_args(), "git", None)
@@ -443,6 +470,32 @@ class ServerTests(Isolated):
         status, data = self.request(port, "GET", f"/api/jobs/{ids[0]}/result")
         self.assertEqual((status, data["schema"]), (200, common.SCHEMA_VERSION))
         self.assertEqual(self.request(port, "GET", "/api/jobs/doesnotexist123")[0], 404)
+
+    def test_personal_mode_adds_typed_emails_and_drops_unticked_ones(self) -> None:
+        subprocess.run(["git", "config", "--global", "user.name", "Someone"], check=True)
+        self.addCleanup(lambda: (self.root / ".gitconfig").unlink(missing_ok=True))
+        make_repo(self.root / "code", "app")
+        args = argparse.Namespace(
+            host="127.0.0.1",
+            port=0,
+            allowed_hosts=None,
+            max_jobs=1,
+            ttl=5,
+            jobs=1,
+            workdir=str(self.root),
+            max_stories=3,
+            git_timeout=60,
+        )
+        app = server.GhisServer(args)
+        options = argparse.Namespace(
+            email=["extra@example.com"],
+            exclude_email=["them@example.com"],
+            local_root=[str(self.root / "code")],
+            url=None,
+        )
+        app.fill_in(server.Job(), "git", options, None, [])
+        # Typed emails join the detected ones (they used to replace them); unticked stay out.
+        self.assertEqual(options.email, ["extra@example.com", "me@example.com"])
 
     def test_personal_mode_rejects_foreign_host_header(self) -> None:
         _, port = self.start("127.0.0.1")

@@ -215,6 +215,7 @@ class GhisServer:
         options = argparse.Namespace(
             url=text_field(payload, "url", 300) or None,
             email=list_field(payload, "emails", 10, 254),
+            exclude_email=list_field(payload, "excludeEmails", 50, 254),
             repo=list_field(payload, "repos", 50, 500),
             name=text_field(payload, "name", 100) or None,
             clone_user=text_field(payload, "cloneUser", 100) or "git",
@@ -299,8 +300,10 @@ class GhisServer:
         if not options.local_root:
             job.progress("Looking for repositories in your home folder...")
             options.local_root = [str(Path.home())]
-        if not options.email:
-            options.email = [e["email"] for e in self.identity()["emails"]]
+        # The emails found on this computer, minus the ones unticked, plus any typed in.
+        excluded = set(options.exclude_email)
+        detected = [e["email"] for e in self.identity()["emails"] if e["email"] not in excluded]
+        options.email = sorted(set(options.email) | set(detected))
         if provider in COLLECTORS and not options.url:
             # Same guess the detection panel shows: the instance your checkouts point at.
             options.url = suggest_url(provider, self.home_repos())

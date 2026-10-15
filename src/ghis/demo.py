@@ -186,5 +186,20 @@ def make_demo(seed: int, provider: str) -> dict[str, Any]:
         "requests": requests,
         "reviews": reviews,
         "activity": activity,
+        "coverage": {
+            "repos": [
+                {
+                    "path": p,
+                    "via": "clone",
+                    "commits": sum(1 for c in commits if c["r"] == i),
+                    "fetchedAt": now.isoformat(timespec="seconds"),
+                }
+                for i, (p, _, _) in enumerate(repos)
+            ],
+            "scanned": len(repos),
+            "skipped": [],
+            "limits": [],
+            "excludedEmails": [],
+        },
         "warnings": ["This is generated sample data."],
     }

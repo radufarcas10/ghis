@@ -229,6 +229,8 @@ main { max-width: 1160px; margin: 0 auto; padding: 0 16px; }
 .faq details[open] summary::after { transform: rotate(45deg); }
 .faq .answer { overflow: hidden; }
 .faq p { margin: 0 0 16px; color: var(--ink-2); }
+.fine { margin: 18px 0 0; font-size: 14px; color: var(--muted); }
+.fine a { color: var(--ink-2); }
 
 .final { text-align: center; padding-bottom: 40px; }
 .final .sub { margin-inline: auto; }

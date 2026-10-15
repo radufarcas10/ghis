@@ -66,6 +66,8 @@
 	let config = { providers: [], allowedHosts: [] };
 	let provider = 'github';
 	let detectRun = 0;
+	// Detected emails the user unticked: kept across provider switches, sent with the form.
+	const excludedEmails = new Set();
 
 	// ------------------------------------------------------------ hero preview
 
@@ -158,10 +160,13 @@
 		lines.push(found.repos
 			? item('ok', `<b>${found.repos} ${found.repos === 1 ? 'repository' : 'repositories'}</b>${from} in your home folder will be read in place`)
 			: item('no', `No repositories${from} in your home folder${found.host ? '' : '. Add a folder below if they live elsewhere'}`));
-		const emails = found.identity.emails.filter((e) => e.commits > 0);
+		const emails = found.identity.emails;
 		if (emails.length) {
-			const list = emails.slice(0, 4).map((e) => `<b>${esc(e.email)}</b>`).join(', ');
-			lines.push(item('ok', `You commit as ${list}${emails.length > 4 ? ` and ${emails.length - 4} more` : ''}`));
+			// Matched by your git name, so a teammate who shares it would be caught too: every
+			// address is listed, with its commits, and can be unticked.
+			const picks = emails.map((e) => `<label class="email-pick"><input type="checkbox" value="${esc(e.email)}"${excludedEmails.has(e.email) ? '' : ' checked'}>
+				<span class="addr">${esc(e.email)}</span><span class="n">${e.commits ? `${Number(e.commits).toLocaleString('en')} commits` : 'no commits yet'}</span></label>`).join('');
+			lines.push(item('ok', `You commit as <span class="d-hint">(untick any that aren't yours)</span><span class="email-picks">${picks}</span>`));
 		}
 		if (provider !== 'git' && found.url) {
 			const host = esc(new URL(found.url).hostname);
@@ -171,6 +176,11 @@
 				: item('no', `No ${esc(spec.label || '')} token found for <b>${host}</b>. That's fine: you'll get a story from your local repositories. Add a token to include ${what}, reviews and repositories you never cloned.`));
 		}
 		box.innerHTML = lines.join('');
+		for (const input of box.querySelectorAll('.email-pick input')) {
+			input.addEventListener('change', () => {
+				if (input.checked) excludedEmails.delete(input.value); else excludedEmails.add(input.value);
+			});
+		}
 		$('#token').placeholder = found.token ? `Leave empty to use @${found.token.username}'s token` : '';
 	}
 
@@ -238,6 +248,7 @@
 			emails: $('#emails').value,
 			repos: provider === 'git' ? $('#repos').value : '',
 			folders: config.personal ? $('#folders').value : '',
+			excludeEmails: config.personal ? [...excludedEmails] : [],
 			name: $('#name').value.trim(),
 			cloneUser: $('#clone-user').value.trim(),
 		};

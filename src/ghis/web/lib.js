@@ -86,6 +86,24 @@
 		+ 'has have had our your their them they you see one two three back should would could after before over under same other each does did done doing pull request requests revert reverts '
 		+ 'version bump chore refactor feat docs style').split(/\s+/));
 	const TICKET_RE = /\b[A-Z][A-Z0-9]{1,9}-\d+\b/g;
+	// Shaped like ticket keys but not tickets: encodings, hashes, standards, CVEs, licences.
+	const NOT_TICKETS = new Set(('UTF SHA ISO RFC CVE CWE ES ECMA IPV IP HTTP TLS SSL AES RSA MD PEP WCAG '
+		+ 'IEEE ANSI GPL LGPL AGPL MPL BSD COVID WIN AMD ARM CSS HTML H264 MP').split(' '));
+
+	// Ticket keys across all of history: a real tracker key comes back with different numbers
+	// (APP-12, APP-480), a stray pattern like "UTF-8" with one; the second filter is the stronger.
+	function ticketPrefixes(texts) {
+		const numbers = new Map();
+		for (const text of texts) {
+			for (const key of String(text || '').match(TICKET_RE) || []) {
+				const [prefix, n] = key.split(/-(?=\d+$)/);
+				if (NOT_TICKETS.has(prefix)) continue;
+				if (!numbers.has(prefix)) numbers.set(prefix, new Set());
+				numbers.get(prefix).add(n);
+			}
+		}
+		return new Set([...numbers].filter(([, ns]) => ns.size >= 2).map(([prefix]) => prefix));
+	}
 
 	// ------------------------------------------------------------ time zones
 
@@ -164,6 +182,8 @@
 		}
 		const ranked = Object.entries(totals).filter(([l]) => l !== 'Other').sort((a, b) => b[1] - a[1]);
 		const langColors = new Map(ranked.slice(0, 6).map(([lang], i) => [lang, `var(--s${i + 1})`]));
+
+		const realTickets = ticketPrefixes([...commits.map((c) => c.s), ...requests.map((r) => r.title)]);
 
 		const yearSet = new Set();
 		for (const c of commits) yearSet.add(c.day.slice(0, 4));
@@ -256,7 +276,9 @@
 
 			const tickets = new Set();
 			for (const text of [...cs.map((c) => c.s), ...reqs.map((r) => r.title)]) {
-				for (const match of String(text || '').match(TICKET_RE) || []) tickets.add(match);
+				for (const match of String(text || '').match(TICKET_RE) || []) {
+					if (realTickets.has(match.split(/-(?=\d+$)/)[0])) tickets.add(match);
+				}
 			}
 			const words = {};
 			for (const c of cs) {
@@ -416,6 +438,12 @@
 			}
 			for (const c of copy.commits || []) c.e = '';
 			if (copy.user) copy.user.webUrl = null;
+			if (copy.coverage) {
+				const rename = (path) => byPath.get(String(path).toLowerCase()) || 'Project ?';
+				copy.coverage.repos = (copy.coverage.repos || []).map((r) => ({ ...r, path: rename(r.path) }));
+				copy.coverage.skipped = (copy.coverage.skipped || []).map((r) => ({ path: rename(r.path), reason: 'not read' }));
+				copy.coverage.excludedEmails = [];
+			}
 			copy.source = { ...copy.source, host: null, emails: [] };
 			copy.warnings = [];
 		}
