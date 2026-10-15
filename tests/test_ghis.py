@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.client
 import json
 import os
@@ -104,6 +105,13 @@ class Isolated(unittest.TestCase):
 
 
 class HelperTests(unittest.TestCase):
+    def test_git_receives_stdin_byte_for_byte(self) -> None:
+        # A text-mode pipe on Windows sends \n as \r\n, and git then rejects every object id
+        # ghis sends it. git hashes exactly what it receives, so the id shows any change.
+        sent = "a\nb\n"
+        expected = hashlib.sha1(b"blob 4\0" + sent.encode()).hexdigest()
+        self.assertEqual(git.git(["hash-object", "--stdin"], stdin=sent).strip(), expected)
+
     def test_activity_is_counted_per_utc_hour(self) -> None:
         activity: dict = {}
         for when in (

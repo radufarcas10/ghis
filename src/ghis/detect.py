@@ -113,18 +113,18 @@ def run_quiet(cmd: list[str], stdin: str | None = None) -> str:
     try:
         proc = subprocess.run(
             cmd,
-            input=stdin,
+            # Bytes, so Windows sends \n as written rather than \r\n.
+            input=stdin.encode("utf-8") if stdin is not None else None,
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=8,
             env=env,
             stdin=None if stdin is not None else subprocess.DEVNULL,
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""
-    return proc.stdout if proc.returncode == 0 else ""
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.decode("utf-8", errors="replace").replace("\r\n", "\n")
 
 
 def token_candidates(provider: str, url: str) -> list[tuple[str, str]]:

@@ -151,23 +151,27 @@ MIN_GIT = (2, 31)  # GIT_CONFIG_COUNT, used to pass the clone token, arrived in 
 
 
 def git(args: list[str], env: dict[str, str] | None = None, stdin: str | None = None) -> str:
+    # Bytes in both directions: a text-mode pipe on Windows turns each \n written to git
+    # into \r\n, and git then rejects every object id sent on stdin ("invalid refspec").
     try:
         proc = subprocess.run(
             ["git", *args],
             env=env,
-            input=stdin,
+            input=stdin.encode("utf-8") if stdin is not None else None,
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=GIT_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
         raise GitError(f"git took longer than {GIT_TIMEOUT:.0f}s and was stopped") from None
     if proc.returncode != 0:
-        lines = proc.stderr.strip().splitlines()
+        lines = _text(proc.stderr).strip().splitlines()
         raise GitError(lines[-1] if lines else f"git {args[0]} exited {proc.returncode}")
-    return proc.stdout
+    return _text(proc.stdout)
+
+
+def _text(raw: bytes) -> str:
+    """git's output as text, with line endings read the way a text-mode pipe reads them."""
+    return raw.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def parse_remote(url: str) -> tuple[str | None, str | None]:
@@ -326,7 +330,9 @@ def sync_clone(
             building.rename(dest)
             return dest, how
         except GitError as err:
-            failure = err  # e.g. a host that refuses this filter: try the next way
+            # e.g. a host that refuses this filter: try the next way, and say why.
+            failure = err
+            log(f"  {project['path']}: {strategy or 'full'} download failed ({err})")
     if building.exists():
         remove_tree(building)
     raise failure or GitError("could not clone")
