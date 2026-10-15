@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import os
+import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,6 +26,7 @@ from .git import (
     git,
     last_fetch,
     parse_remote,
+    remove_tree,
     scan_repo,
     sync_clone,
 )
@@ -59,9 +62,42 @@ def project_from_url(url: str) -> dict[str, Any]:
     }
 
 
+CLONES_PREFIX = "ghis-clones-"
+
+
 def collect(args: argparse.Namespace, provider: str, token: str | None) -> dict[str, Any]:
     """Gather everything into the history.json shape. `args.allowed_hosts` (a set) is how
-    the server confines a request to hosts it trusts; the CLI leaves it None."""
+    the server confines a request to hosts it trusts; the CLI leaves it None.
+
+    Clones go to a temporary folder that is deleted afterwards, whatever happens, unless
+    `args.cache` names a folder to keep them in (--keep-clones), where the next run only
+    fetches what changed."""
+    if args.cache or args.no_clone:
+        return _collect(args, provider, token)
+    base = getattr(args, "workdir", None) or tempfile.gettempdir()
+    sweep_stale_clones(Path(base))
+    clones = Path(tempfile.mkdtemp(prefix=CLONES_PREFIX, dir=base))
+    try:
+        return _collect(argparse.Namespace(**{**vars(args), "cache": str(clones)}), provider, token)
+    finally:
+        try:
+            remove_tree(clones)
+        except OSError:
+            pass  # a file still locked (Windows); the next run sweeps it
+
+
+def sweep_stale_clones(base: Path, age: float = 24 * 3600) -> None:
+    """Delete clone folders a killed run left behind. Only day-old ones: a younger folder
+    may belong to a run that is still going."""
+    for leftover in base.glob(f"{CLONES_PREFIX}*"):
+        try:
+            if leftover.is_dir() and time.time() - leftover.stat().st_mtime > age:
+                remove_tree(leftover)
+        except OSError:
+            pass
+
+
+def _collect(args: argparse.Namespace, provider: str, token: str | None) -> dict[str, Any]:
     check_git()
     allowed: set[str] | None = getattr(args, "allowed_hosts", None)
     restricted = allowed is not None
@@ -203,12 +239,17 @@ def collect(args: argparse.Namespace, provider: str, token: str | None) -> dict[
             cache = Path(args.cache).expanduser().resolve()
             cache.mkdir(parents=True, exist_ok=True)
             env = clone_env(token, api["cloneUser"] or "git", restricted)
-            log(f"Cloning/fetching {len(to_clone)} repositories into {cache} ...")
+            log(
+                f"Downloading {len(to_clone)} repositories: their history, then only the files "
+                "your commits changed..."
+            )
+            mine = sorted(emails)
 
             def sync(item: tuple[str, dict[str, Any]]) -> tuple[str, str | None, str | None]:
                 key, project = item
                 try:
-                    return key, str(sync_clone(project, cache, args.clone_via, env)), None
+                    path = sync_clone(project, cache, args.clone_via, env, mine)
+                    return key, str(path), None
                 except GitError as err:
                     return key, None, str(err)
 

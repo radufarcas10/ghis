@@ -40,6 +40,8 @@ server). You should get a reply within a week.
   requests addressed to `localhost`, `*.localhost` (such as `ghis.localhost`, which
   browsers always resolve to this computer), `127.0.0.1` or `[::1]`. That blocks
   DNS-rebinding pages, and the cross-site checks above stop other websites from starting jobs.
+- Deletes the repositories it downloads once each story is built, unless you pass
+  `--keep-clones`.
 
 ## Out of scope
 

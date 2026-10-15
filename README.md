@@ -112,7 +112,14 @@ How it counts:
   current it is, the emails matched, and anything left out.
 - **Times** are shown in the timezone you committed from. Review and comment activity is moved
   into that same timezone, so it lands on the right day.
-- Clones are cached in `cache/`, so the second run only fetches what changed.
+- **Only what it needs is downloaded.** A repository's history comes first, without its
+  files. Then, in one request, only the file versions your own commits changed are fetched.
+  On a large repository that is a fraction of a full clone, and the numbers are identical.
+- **Nothing is left behind.** Downloads go to a temporary folder that is deleted when the
+  story is built, even if it fails or you stop it. The story itself is saved to `out/`.
+  To make later stories faster, tick **Keep downloaded repositories** in the app (or pass
+  `--keep-clones`): they stay in `cache/`, and the next run only fetches what changed.
+  Untick it, and the next story deletes them.
 
 ## Using the command line
 
@@ -138,6 +145,7 @@ Useful flags (all are listed under `python3 ghis.py collect --help`):
 | `--exclude-email ADDR` | leave out an email that isn't yours, e.g. a teammate who shares your git name (repeatable) |
 | `--local-root DIR` | read checkouts under `DIR` in place instead of cloning (repeatable) |
 | `--clone-via https` | clone with the token instead of your SSH keys (default: `ssh`) |
+| `--keep-clones` | keep downloaded repositories in `cache/` so the next run only fetches what changed (`ghis serve` takes it too) |
 | `--all-member-projects` | include every repository you can access, not just the ones you contributed to |
 | `--count-all-files` | count lockfile, build and vendored lines too |
 | `--token-file PATH` | read the token from a file instead of the environment |
@@ -285,8 +293,9 @@ uses. To choose one yourself, run `python3 ghis.py serve --port 9000 --open`.
 
 ## Privacy
 
-Running on your computer, ghis talks only to the host you choose. The generated `out/`
-folder and the `cache/` of clones contain your private history and are ignored by git.
+Running on your computer, ghis talks only to the host you choose, and deletes the
+repositories it downloads as soon as the story is built. The generated `out/` folder (and
+`cache/`, if you use `--keep-clones`) contains your private history and is ignored by git.
 Think before you share a `history.json` or a printed story: they include commit messages
 and repository names.
 

@@ -274,6 +274,35 @@ class CollectTests(Isolated):
         everything = git.scan_repo(str(self.repo), ["me@example.com"], ())
         self.assertEqual(min(everything, key=lambda c: c["t"])["a"], 510)
 
+    def test_blobless_clone_downloads_only_your_files(self) -> None:
+        source = make_repo(self.root / "served", "app")
+        for key in ("uploadpack.allowFilter", "uploadpack.allowAnySHA1InWant"):
+            subprocess.run(["git", "-C", str(source), "config", key, "true"], check=True)
+        project = {"path": "team/app", "cloneUrl": source.as_uri()}
+        clone = git.sync_clone(project, self.root / "blobless", "https", None, ["me@example.com"])
+        self.assertTrue(git.is_partial(clone))
+        # Your files arrived in the one request and someone else's never did. Checked before
+        # reading, since a read would fetch a missing file by itself; --missing=print lists
+        # what is absent without fetching it.
+        blob = lambda spec: git.git(["-C", str(source), "rev-parse", spec]).strip()  # noqa: E731
+        listing = ["-C", str(clone), "rev-list", "--objects", "--all", "--missing=print"]
+        missing = {line[1:] for line in git.git(listing).split() if line.startswith("?")}
+        self.assertIn(blob("HEAD~2:other.js"), missing)  # their commit
+        self.assertNotIn(blob("HEAD~4:app.py"), missing)  # your first commit
+        self.assertNotIn(blob("HEAD~3:src/main.py"), missing)  # your rename
+        # And reading the clone gives exactly what reading the original does.
+        scan = lambda repo: git.scan_repo(str(repo), ["me@example.com"], ())  # noqa: E731
+        self.assertEqual(scan(clone), scan(source))
+
+    def test_host_that_cannot_send_single_files_gets_a_full_clone(self) -> None:
+        source = make_repo(self.root / "served-old", "app")
+        subprocess.run(["git", "-C", str(source), "config", "uploadpack.allowFilter", "true"])
+        project = {"path": "team/old", "cloneUrl": source.as_uri()}
+        with mock.patch.object(git, "fetch_your_files", side_effect=git.GitError("refused")):
+            clone = git.sync_clone(project, self.root / "full", "https", None, ["me@example.com"])
+        self.assertFalse(git.is_partial(clone))
+        self.assertEqual(len(git.scan_repo(str(clone), ["me@example.com"], ())), 3)
+
     def test_collect_local_folders(self) -> None:
         data = collect_mod.collect(collect_args(local_root=[str(self.root / "code")]), "git", None)
         self.assertEqual(data["schema"], common.SCHEMA_VERSION)
@@ -403,6 +432,7 @@ class ServerTests(Isolated):
             public_url=None,
             default_provider=None,
             default_url=None,
+            keep_clones=False,
         )
         base.update(settings)
         return argparse.Namespace(**base)
@@ -561,6 +591,35 @@ class ServerTests(Isolated):
         app.fill_in(server.Job(), "git", options, None, [])
         # Typed emails join the detected ones (they used to replace them); unticked stay out.
         self.assertEqual(options.email, ["extra@example.com", "me@example.com"])
+
+    def test_keep_clones_is_the_owners_choice_per_story(self) -> None:
+        data = self.root / "data"
+        patch = mock.patch.object(server, "DATA_DIR", data)  # never the real cache/
+        patch.start()
+        self.addCleanup(patch.stop)
+        kept = str(data / "cache")
+        personal = server.GhisServer(self.server_args("127.0.0.1"))
+        self.assertEqual(personal.clone_cache({}), "")  # deleted after the story by default
+        self.assertEqual(personal.clone_cache({"keepClones": True}), kept)
+        always = server.GhisServer(self.server_args("127.0.0.1", keep_clones=True))
+        self.assertEqual(always.clone_cache({}), kept)  # --keep-clones sets the default
+        self.assertEqual(always.clone_cache({"keepClones": False}), "")  # the box wins
+        self.assertEqual(always.clone_cache({"keepClones": "yes"}), kept)  # not a bool: ignored
+        hosted = server.GhisServer(self.server_args("0.0.0.0", keep_clones=True))
+        self.assertEqual(hosted.clone_cache({"keepClones": True}), "")  # never on a server
+        self.assertIsNone(hosted.config()["clones"])
+
+        # The form shows what is kept, and unticking deletes it, but not mid-read.
+        (data / "cache" / "team__app.git").mkdir(parents=True)
+        (data / "cache" / "team__app.git" / "pack").write_bytes(b"x" * 2048)
+        self.assertEqual(personal.config()["clones"]["bytes"], 2048)
+        personal.keeping = 1  # another story is reading the kept clones
+        personal.drop_kept_clones()
+        self.assertTrue((data / "cache").exists())
+        personal.keeping = 0
+        personal.drop_kept_clones()
+        self.assertFalse((data / "cache").exists())
+        self.assertEqual(personal.config()["clones"]["bytes"], 0)
 
     def test_personal_mode_rejects_foreign_host_header(self) -> None:
         _, port = self.start("127.0.0.1")

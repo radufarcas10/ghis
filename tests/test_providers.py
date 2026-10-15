@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -118,7 +120,8 @@ def by_day(activity: dict[str, dict[str, int]], action: str) -> int:
 
 
 def gitlab_project(pid: int, path: str, repo: Path | None = None) -> dict[str, Any]:
-    clone = str(repo) if repo else f"https://gitlab.example/{path}.git"
+    # file:// like a real host: a plain path makes git copy the folder, skipping the protocol.
+    clone = repo.as_uri() if repo else f"https://gitlab.example/{path}.git"
     return {
         "id": pid,
         "path_with_namespace": path,
@@ -270,9 +273,25 @@ class GitLabTests(Isolated):
         app = paths.index("team/app")
         self.assertEqual(len([c for c in data["commits"] if c["r"] == app]), 3)
         self.assertEqual(data["source"]["clonedRepos"], 1)
-        # A second run fetches into the cached clone instead of cloning again.
+        # A second run fetches into the kept clone instead of cloning again.
         again = collect_mod.collect(args, "gitlab", "glpat-secret")
         self.assertEqual(len(again["commits"]), len(data["commits"]))
+
+    def test_downloads_are_deleted_after_the_story(self) -> None:
+        repo = make_repo(self.root / "remote-temp", "app")
+        host = fake_gitlab(repo)
+        self.addCleanup(host.close)
+        work = self.root / "work"
+        work.mkdir()
+        # A killed run's leftovers: a day-old one is swept, a fresh one may still be in use.
+        stale, fresh = work / "ghis-clones-stale", work / "ghis-clones-fresh"
+        stale.mkdir()
+        fresh.mkdir()
+        os.utime(stale, (time.time() - 2 * 86400,) * 2)
+        args = options(url=host.url, no_clone=False, cache="", workdir=str(work))
+        data = collect_mod.collect(args, "gitlab", "glpat-secret")
+        self.assertEqual(data["source"]["clonedRepos"], 1)
+        self.assertEqual(sorted(p.name for p in work.iterdir()), ["ghis-clones-fresh"])
 
 
 # --------------------------------------------------------------------------- GitHub

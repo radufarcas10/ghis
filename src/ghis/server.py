@@ -2,7 +2,7 @@
 
 Hosted mode serves strangers: an allowlist, https-only clones, temporary clones.
 Personal mode (bound to loopback, so only this computer can connect) also reads local
-folders, clones over ssh, keeps the clone cache and saves each story to the data folder."""
+folders and saves each story to the data folder. Neither mode keeps what it downloads."""
 
 from __future__ import annotations
 
@@ -131,6 +131,22 @@ def public_origin(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}".lower()
 
 
+def kept_clones() -> Path:
+    """Where personal mode keeps downloaded repositories when asked to (--keep-clones)."""
+    return DATA_DIR / "cache"
+
+
+def folder_size(folder: Path) -> int:
+    total = 0
+    for base, _, files in os.walk(folder):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(base, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 PRETTY_HOST = "ghis.localhost"
 
@@ -138,7 +154,7 @@ PRETTY_HOST = "ghis.localhost"
 class GhisServer:
     """Hosted mode serves strangers: an allowlist, https-only clones, temporary clones.
     Personal mode (bound to loopback, so only this computer can connect) also reads local
-    folders, clones over ssh, keeps the clone cache and saves each story to out/."""
+    folders and saves each story to out/."""
 
     def __init__(self, args: argparse.Namespace) -> None:
         self.personal = args.host in LOOPBACK_HOSTS
@@ -154,6 +170,8 @@ class GhisServer:
         self.ttl = (args.ttl or (24 * 60 if self.personal else 60)) * 60
         self.max_stored = args.max_stories
         self.git_jobs = args.jobs
+        self.keep_clones = args.keep_clones
+        self.keeping = 0  # running jobs that read from the kept clones
         self.workdir = Path(args.workdir or tempfile.gettempdir()) / "ghis-jobs"
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.identity_cache: tuple[float, dict[str, Any]] | None = None
@@ -221,7 +239,26 @@ class GhisServer:
             "personal": self.personal,
             "outDir": tilde(DATA_DIR / "out") if self.personal else None,
             "defaults": self.defaults,
+            # The "keep downloaded repositories" choice; only this computer's owner gets one.
+            "clones": {
+                "keep": self.keep_clones,
+                "dir": tilde(kept_clones()),
+                "bytes": folder_size(kept_clones()),
+            }
+            if self.personal
+            else None,
         }
+
+    def clone_cache(self, payload: dict[str, Any]) -> str:
+        """Where a job's clones go: "" for a temporary folder deleted afterwards, or the kept
+        folder when this computer's owner chose to keep them (the form's checkbox, else
+        --keep-clones). A hosted server never keeps anything."""
+        if not self.personal:
+            return ""
+        keep = payload.get("keepClones")
+        if not isinstance(keep, bool):
+            keep = self.keep_clones
+        return str(kept_clones()) if keep else ""
 
     def add(self, job: Job) -> Job:
         with self.jobs_lock:
@@ -254,7 +291,8 @@ class GhisServer:
             count_all_files=False,
             jobs=self.git_jobs,
             insecure=False,
-            cache="",
+            cache=self.clone_cache(payload),
+            workdir=None if self.personal else str(self.workdir),
             allowed_hosts=None if "*" in self.allowed else self.allowed,
         )
         token = text_field(payload, "token", 500) or None
@@ -266,21 +304,18 @@ class GhisServer:
         if not self.slots.acquire(blocking=False):
             job.progress("Waiting for a free worker...")
             self.slots.acquire()
-        # Personal mode keeps clones between runs so the next story only fetches.
-        cache = (
-            DATA_DIR / "cache"
-            if self.personal
-            else Path(tempfile.mkdtemp(prefix="job-", dir=self.workdir))
-        )
-        options.cache = str(cache)
         _sink.job = job
         job.status = "running"
         notes: list[str] = []
         requested = provider
+        with self.jobs_lock:
+            self.keeping += bool(options.cache)
         try:
             if self.personal:
                 provider, token = self.fill_in(job, provider, options, token, notes)
             data = collect(options, provider, token)
+            if self.personal and not options.cache:
+                self.drop_kept_clones()
             data["warnings"] = notes + data["warnings"]
             if provider != requested:
                 # Built without the API, but it is still this host's story: keep its name and
@@ -308,14 +343,25 @@ class GhisServer:
                 "or run the CLI locally for details.",
             )
         finally:
+            with self.jobs_lock:
+                self.keeping -= bool(options.cache)
             _sink.job = None
             token = None
-            if not self.personal:
-                try:
-                    remove_tree(cache)
-                except OSError:
-                    pass  # a file still locked (Windows); the temp folder gets swept later
             self.slots.release()
+
+    def drop_kept_clones(self) -> None:
+        """ "Keep" was unticked: delete what earlier stories kept. Not while another story
+        is still reading from it."""
+        folder = kept_clones()
+        with self.jobs_lock:
+            if self.keeping or not folder.exists():
+                return
+            size = folder_size(folder)
+            try:
+                remove_tree(folder)
+            except OSError:
+                return  # a file still in use (Windows); tried again after the next story
+        log(f"Deleted the repositories kept from earlier stories ({size // 1_000_000} MB).")
 
     def fill_in(
         self,

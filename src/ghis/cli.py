@@ -25,13 +25,24 @@ from pathlib import Path
 
 from . import __version__
 from .collect import collect, pick_provider, read_token
-from .common import DATA_DIR, CollectError, die, log, trust_ca_file
+from .common import DATA_DIR, CollectError, die, log, tilde, trust_ca_file
 from .demo import make_demo
 from .detect import find_token
 from .providers import COLLECTORS, PROVIDERS
 from .server import DEFAULT_ALLOWED_HOSTS
 from .server import serve as run_server
 from .site import write_site
+
+
+def keep_clones(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--keep-clones",
+        action="store_true",
+        default=os.environ.get("GHIS_KEEP_CLONES", "") not in ("", "0"),
+        help=f"keep downloaded repositories in {tilde(DATA_DIR / 'cache')} so the next story "
+        "only fetches what changed (env GHIS_KEEP_CLONES=1; default: delete them after "
+        "reading; never when hosted)",
+    )
 
 
 def ca_file(parser: argparse.ArgumentParser) -> None:
@@ -52,6 +63,8 @@ def cmd_collect(args: argparse.Namespace) -> None:
         if found:
             token = found[0]
             log(f"Using your token from {found[1]} (@{found[2]}).")
+    if args.keep_clones and not args.cache:
+        args.cache = str(DATA_DIR / "cache")
     try:
         data = collect(args, provider, token)
     except CollectError as err:
@@ -138,7 +151,10 @@ def main() -> None:
         help="never clone; read commits from local checkouts only",
     )
     collect.add_argument("--clone-via", choices=("ssh", "https"), default="ssh")
-    collect.add_argument("--cache", default=str(DATA_DIR / "cache"), help="where clones are kept")
+    keep_clones(collect)
+    collect.add_argument(
+        "--cache", default="", help="keep clones in this folder instead (implies --keep-clones)"
+    )
     collect.add_argument(
         "--all-member-projects",
         action="store_true",
@@ -228,6 +244,7 @@ def main() -> None:
         "(env GHIS_DEFAULT_URL; needs --default-provider)",
     )
     serve.add_argument("--jobs", type=int, default=4, help="parallel git processes per job")
+    keep_clones(serve)
     ca_file(serve)
     serve.add_argument("--workdir", help="where temporary clones go (default: system temp)")
     serve.set_defaults(func=run_server)

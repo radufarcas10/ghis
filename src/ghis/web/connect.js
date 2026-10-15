@@ -250,6 +250,7 @@
 			repos: provider === 'git' ? $('#repos').value : '',
 			folders: config.personal ? $('#folders').value : '',
 			excludeEmails: config.personal ? [...excludedEmails] : [],
+			keepClones: config.personal ? $('#keep-clones').checked : false,
 			name: $('#name').value.trim(),
 			cloneUser: $('#clone-user').value.trim(),
 		};
@@ -364,6 +365,31 @@
 		upload(e.dataTransfer.files[0]);
 	});
 
+	// ------------------------------------------------------------ personal mode: keep downloads
+
+	// Off unless chosen: downloads are deleted after each story. The choice is remembered in
+	// this browser; until there is one, the server's --keep-clones decides.
+	function setUpKeepClones(clones) {
+		const box = $('#keep-clones');
+		let saved = null;
+		try { saved = localStorage.getItem('ghis:keepClones'); } catch { /* storage blocked */ }
+		box.checked = saved === null ? Boolean(clones.keep) : saved === '1';
+		const describe = () => {
+			const size = clones.bytes >= 1e9 ? `${(clones.bytes / 1e9).toFixed(1)} GB` : `${Math.round(clones.bytes / 1e6)} MB`;
+			$('#keep-hint').textContent = box.checked
+				? `Kept in ${clones.dir}${clones.bytes ? ` (${size} now)` : ''}, so the next story only fetches new commits.`
+				: clones.bytes
+					? `Downloads are deleted after the story. The ${size} kept in ${clones.dir} will be deleted too.`
+					: 'Downloads are deleted as soon as the story is built.';
+		};
+		box.addEventListener('change', () => {
+			try { localStorage.setItem('ghis:keepClones', box.checked ? '1' : '0'); } catch { /* storage blocked */ }
+			describe();
+		});
+		describe();
+		$('#f-keep').hidden = false;
+	}
+
 	// ------------------------------------------------------------ boot
 
 	if (location.protocol === 'file:') {
@@ -379,6 +405,7 @@
 			mode.innerHTML = '<span class="dot" aria-hidden="true"></span>Running on this computer';
 			$('#privacy-text').textContent = `Everything stays on this computer: ghis only talks to the host you pick, keeps your token in memory and saves each story to ${c.outDir}.`;
 			$('#folders').placeholder = '~  (your whole home folder)';
+			setUpKeepClones(c.clones);
 			SUB.git = 'or just this computer';
 		} else {
 			const ttl = c.ttlMinutes ? ` Stories are kept for ${c.ttlMinutes} minutes, then forgotten.` : '';

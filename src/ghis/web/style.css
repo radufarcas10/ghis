@@ -595,6 +595,10 @@ tr:last-child td { border-bottom: 0; }
 .field label, .field .label { font-size: 14px; font-weight: 600; }
 .field .hint { font-size: 13px; color: var(--muted); }
 .field .hint a { color: var(--ink-2); }
+/* A checkbox field: its hint lines up under the label text, not under the box. */
+.field .check { margin: 0; }
+.field .check input { margin: 2px 0 0; flex: none; }
+.field .check + .hint { padding-left: 27px; }
 .input {
 	width: 100%; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--border);
 	background: var(--page); transition: border-color 0.2s, box-shadow 0.2s;

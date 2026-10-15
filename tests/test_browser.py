@@ -128,6 +128,7 @@ class BrowserTests(unittest.TestCase):
             public_url=None,
             default_provider="gitlab",  # a team's server can start everyone on its host
             default_url=None,
+            keep_clones=False,
         )
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(server.GhisServer(args)))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -140,6 +141,8 @@ class BrowserTests(unittest.TestCase):
             self.assertIn(f'data-provider="{provider}"', connect)
         self.assertIn("How do I get a token?", connect)
         self.assertRegex(connect, r'data-provider="gitlab" aria-checked="true"')
+        # Keeping downloads is this computer's owner's choice; a hosted form never offers it.
+        self.assertRegex(connect, r'id="f-keep" hidden')
 
         conn = http.client.HTTPConnection("127.0.0.1", httpd.server_address[1], timeout=10)
         body = json.dumps(demo.make_demo(5, "gitea"))

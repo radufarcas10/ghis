@@ -150,11 +150,12 @@ GIT_TIMEOUT: float | None = None
 MIN_GIT = (2, 31)  # GIT_CONFIG_COUNT, used to pass the clone token, arrived in 2.31
 
 
-def git(args: list[str], env: dict[str, str] | None = None) -> str:
+def git(args: list[str], env: dict[str, str] | None = None, stdin: str | None = None) -> str:
     try:
         proc = subprocess.run(
             ["git", *args],
             env=env,
+            input=stdin,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -254,12 +255,23 @@ def remove_tree(path: Path) -> None:
         shutil.rmtree(path, onerror=retry)
 
 
-def sync_clone(project: dict[str, Any], cache: Path, via: str, env: dict[str, str]) -> Path:
+def sync_clone(
+    project: dict[str, Any], cache: Path, via: str, env: dict[str, str], emails: list[str]
+) -> Path:
+    """A bare copy of a repository holding everything needed to read your commits.
+
+    Only history is downloaded at first (commits and folder listings, a "blobless" clone),
+    then, in one request, the file versions your own commits changed: numstat compares
+    exactly those. A large repository costs a fraction of a full clone, and the result is
+    identical. A host that can't serve that (an old server) gets a full clone instead."""
     dest = cache / (re.sub(r"[^\w.-]+", "__", project["path"]) + ".git")
     url = clone_url(project, via)
     if not url:
         raise GitError("no clone URL")
-    if dest.exists():
+    if dest.exists():  # kept from an earlier run (--keep-clones): fetch what changed
+        partial = is_partial(dest)
+        if partial:
+            git(["-C", str(dest), "remote", "set-url", "origin", url], env=env)
         git(
             [
                 "-C",
@@ -268,19 +280,86 @@ def sync_clone(project: dict[str, Any], cache: Path, via: str, env: dict[str, st
                 "--quiet",
                 "--prune",
                 "--force",
-                url,
+                # The promisor remote by name, so the fetch stays blobless.
+                "origin" if partial else url,
                 "+refs/heads/*:refs/heads/*",
                 "+refs/tags/*:refs/tags/*",
             ],
             env=env,
         )
-    else:
-        partial = dest.with_suffix(".partial")
-        if partial.exists():
-            remove_tree(partial)
-        git(["clone", "--bare", "--quiet", url, str(partial)], env=env)
-        partial.rename(dest)
+        if partial:
+            fetch_your_files(dest, emails, env)
+        return dest
+    building = dest.with_suffix(".partial")
+    if building.exists():
+        remove_tree(building)
+    git(["clone", "--bare", "--quiet", "--filter=blob:none", url, str(building)], env=env)
+    if is_partial(building):  # a server without partial clone sends everything instead
+        try:
+            fetch_your_files(building, emails, env)
+        except GitError as err:
+            log(f"  {project['path']}: this host can't send single files ({err}); full clone")
+            remove_tree(building)
+            git(["clone", "--bare", "--quiet", url, str(building)], env=env)
+    building.rename(dest)
     return dest
+
+
+def is_partial(repo: Path) -> bool:
+    """Whether a clone left files on the server to fetch later. Recent git marks the remote
+    (remote.origin.promisor); older versions set extensions.partialClone."""
+    for key in ("remote.origin.promisor", "extensions.partialClone"):
+        try:
+            value = git(["-C", str(repo), "config", "--get", key]).strip().lower()
+        except GitError:
+            continue  # not set
+        if value and value != "false":
+            return True
+    return False
+
+
+# The files fetched so far into a kept clone, so the next run asks only for new ones.
+FETCHED_LIST = "ghis-fetched-files"
+
+
+def fetch_your_files(repo: Path, emails: list[str], env: dict[str, str]) -> None:
+    """Download, in one request, every file version that your commits changed: the ones
+    scan_repo will compare. --raw lists them from folder listings alone, without the files."""
+    wanted: set[str] = set()
+    for filters in mine_filters(emails):
+        out = _git_log(str(repo), ["--no-renames", "--raw", "--no-abbrev", "--format="], filters)
+        for line in out.splitlines():
+            if not line.startswith(":"):
+                continue
+            old_mode, new_mode, old, new = line[1:].split("\t", 1)[0].split()[:4]
+            # Mode 160000 is a submodule: its id names a commit elsewhere, not a file here.
+            if old_mode != "160000":
+                wanted.add(old)
+            if new_mode != "160000":
+                wanted.add(new)
+    wanted -= {"0" * 40, "0" * 64}  # the "no file" side of an addition or a deletion
+    record = repo / FETCHED_LIST
+    fetched = set(record.read_text(encoding="ascii").split()) if record.is_file() else set()
+    missing = sorted(wanted - fetched)
+    if missing:
+        git(
+            [
+                "-C",
+                str(repo),
+                "-c",
+                "fetch.negotiationAlgorithm=noop",  # ask for exactly these, nothing else
+                "fetch",
+                "origin",
+                "--no-tags",
+                "--no-write-fetch-head",
+                "--recurse-submodules=no",
+                "--filter=blob:none",
+                "--stdin",
+            ],
+            env=env,
+            stdin="\n".join(missing) + "\n",
+        )
+    record.write_text("\n".join(sorted(fetched | wanted)) + "\n", encoding="ascii")
 
 
 def clone_url(project: dict[str, Any], via: str) -> str | None:
@@ -309,7 +388,7 @@ def language_of(path: str) -> str:
     return LANGUAGES.get(os.path.splitext(name)[1], "Other")
 
 
-def _log(repo: str, fmt: str, filters: list[str]) -> str:
+def _git_log(repo: str, output: list[str], filters: list[str]) -> str:
     return git(
         [
             "-C",
@@ -320,13 +399,22 @@ def _log(repo: str, fmt: str, filters: list[str]) -> str:
             "--exclude=refs/stash",
             "--exclude=refs/notes/*",
             "--all",
-            "--numstat",
+            *output,
             "--fixed-strings",
             "--regexp-ignore-case",
-            f"--format={fmt}",
             *filters,
         ]
     )
+
+
+def _log(repo: str, fmt: str, filters: list[str]) -> str:
+    return _git_log(repo, ["--numstat", f"--format={fmt}"], filters)
+
+
+def mine_filters(emails: list[str]) -> tuple[list[str], list[str]]:
+    """git log filters for your commits: the ones you authored, and the ones whose message
+    names you (scan_repo keeps those with a real Co-authored-by trailer)."""
+    return [f"--author={e}" for e in emails], [f"--grep={e}" for e in emails]
 
 
 def _parse(out: str, ignore: tuple[str, ...], trailers: bool) -> list[dict[str, Any]]:
@@ -376,10 +464,11 @@ def _parse(out: str, ignore: tuple[str, ...], trailers: bool) -> list[dict[str, 
 def scan_repo(repo: str, emails: list[str], ignore: tuple[str, ...]) -> list[dict[str, Any]]:
     """Your commits in one repository: the ones you authored, plus the ones that credit you
     in a Co-authored-by trailer (pair programming, suggested changes), marked "co"."""
-    authored = _parse(_log(repo, LOG_FORMAT, [f"--author={e}" for e in emails]), ignore, False)
+    by_author, by_message = mine_filters(emails)
+    authored = _parse(_log(repo, LOG_FORMAT, by_author), ignore, False)
     # --grep finds the email anywhere in the message; the trailer check below keeps only real
     # co-authorship, and commits you also authored are already in the first list.
-    mentioned = _parse(_log(repo, CO_FORMAT, [f"--grep={e}" for e in emails]), ignore, True)
+    mentioned = _parse(_log(repo, CO_FORMAT, by_message), ignore, True)
     mine = set(emails)
     co_authored = []
     for commit in mentioned:
