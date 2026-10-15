@@ -152,7 +152,8 @@ page after changing it, without collecting again.
 Run ghis as a web app that colleagues or the public open in their browser:
 
 ```bash
-docker run -p 8080:8080 ghcr.io/radufarcas10/ghis:latest     # http://localhost:8080
+git clone https://github.com/radufarcas10/ghis.git && cd ghis
+docker compose up --build      # http://localhost:8080
 ```
 
 When ghis is reachable by others, it switches to **hosted mode**:
@@ -163,9 +164,13 @@ When ghis is reachable by others, it switches to **hosted mode**:
 - Visitors can also upload a `history.json` made with the CLI. That is how to include
   instances the server cannot reach.
 
-The image runs on any container host (a VPS, Fly.io, Render, Railway, Cloud Run, Kubernetes)
-on amd64 and arm64. `:latest` is the newest release, `:0.1.0` pins one, and `:edge` follows
-`main`. To build it yourself instead, run `docker compose up --build` in a checkout.
+There is no published image: you build your own from the source you cloned, so you know
+exactly what runs. It works on any container host (a VPS, Fly.io, Render, Railway, Cloud Run,
+Kubernetes). To run it on several servers, push your build to your own registry:
+
+```bash
+docker build -t registry.example.com/team/ghis:1 . && docker push registry.example.com/team/ghis:1
+```
 
 ### Deploy for your team
 
@@ -176,8 +181,10 @@ certificate itself. On a server whose DNS name points at it, with ports 80 and 4
 ```bash
 git clone https://github.com/radufarcas10/ghis.git && cd ghis
 cp deploy/.env.example deploy/.env       # set the domain, login and your instance
-docker compose -f deploy/compose.yml up -d
+docker compose -f deploy/compose.yml up -d --build
 ```
+
+To update later, `git pull` and run the last command again.
 
 For a company GitLab at `gitlab.example.com`, `deploy/.env` would hold:
 

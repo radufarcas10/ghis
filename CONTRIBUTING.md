@@ -136,10 +136,8 @@ tools/screenshots.sh     # needs Chrome
 1. Set the new version in `src/ghis/__init__.py`.
 2. Tag it and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
 
-[`.github/workflows/image.yml`](.github/workflows/image.yml) then publishes the Docker image
-as `ghcr.io/<owner>/ghis:0.2.0`, `:0.2` and `:latest`, for amd64 and arm64. Every push to
-`main` also publishes `:edge`. The first time, GitHub creates the package as private: make it
-public in the package's settings so `docker run` works without logging in.
+No package or image is published. People install from the repository (`pipx install
+git+…`), and whoever hosts ghis builds the Docker image from source (see the README).
 
 ## Adding a provider
 

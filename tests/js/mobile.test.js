@@ -61,7 +61,6 @@ async function openChrome() {
 	await new Promise((resolve, reject) => { ws.addEventListener('open', resolve); ws.addEventListener('error', reject); });
 	let id = 0;
 	const replies = new Map();
-	const listeners = new Map();
 	ws.addEventListener('message', (event) => {
 		const message = JSON.parse(event.data);
 		if (message.id && replies.has(message.id)) {
@@ -69,19 +68,27 @@ async function openChrome() {
 			replies.delete(message.id);
 			if (message.error) reject(new Error(`${message.error.message} (${message.error.code})`));
 			else resolve(message.result);
-		} else if (message.method && listeners.has(message.method)) {
-			listeners.get(message.method)();
-			listeners.delete(message.method);
 		}
 	});
 	const send = (method, params = {}) => new Promise((resolve, reject) => {
 		replies.set(++id, { resolve, reject });
 		ws.send(JSON.stringify({ id, method, params }));
 	});
-	const next = (event, ms) => new Promise((resolve, reject) => {
-		const timer = setTimeout(() => reject(new Error(`no ${event} within ${ms} ms`)), ms);
-		listeners.set(event, () => { clearTimeout(timer); resolve(); });
-	});
+	const evaluate = async (expression) => (await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })).result.value;
+	// Opens a page and waits until it has fully loaded. Asks the page itself rather than waiting
+	// for a load event, which a slow machine (Windows CI) can deliver before the listener exists
+	// or not at all; the old document is marked, so its own "complete" never counts.
+	const open = async (name, url, ms = 60000) => {
+		await evaluate('window.__ghisOld = true');
+		const { errorText } = await send('Page.navigate', { url });
+		assert.ok(!errorText, `${name} did not open: ${errorText}`);
+		for (const start = Date.now(); Date.now() - start < ms; await sleep(100)) {
+			try {
+				if (await evaluate('!window.__ghisOld && document.readyState === "complete"')) return;
+			} catch { /* between documents */ }
+		}
+		assert.fail(`${name} did not finish loading within ${ms / 1000} s`);
+	};
 	const close = async () => {
 		ws.close();
 		const exited = new Promise((resolve) => proc.once('exit', resolve));
@@ -98,8 +105,7 @@ async function openChrome() {
 			}
 		}
 	};
-	await send('Page.enable');
-	return { send, next, close };
+	return { send, evaluate, open, close };
 }
 
 // The page's width against the phone's, and which elements stick out. (A wide ::before or
@@ -131,12 +137,9 @@ test('every page fits a phone without zooming out', { skip, timeout: 180000 }, a
 	await chrome.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
 
 	for (const [name, url] of Object.entries(pages)) {
-		const loaded = chrome.next('Page.loadEventFired', 30000);
-		await chrome.send('Page.navigate', { url });
-		await loaded;
-		await chrome.send('Runtime.evaluate', { expression: SETTLED, awaitPromise: true });
-		const { result } = await chrome.send('Runtime.evaluate', { expression: MEASURE, returnByValue: true });
-		const { page, phone, culprits } = result.value;
+		await chrome.open(name, url);
+		await chrome.evaluate(SETTLED);
+		const { page, phone, culprits } = await chrome.evaluate(MEASURE);
 		assert.ok(page <= phone, `${name} is ${page}px wide on a ${phone}px phone; sticking out: ${culprits.join(', ') || 'a pseudo-element'}`);
 	}
 });
@@ -147,22 +150,16 @@ test('the share card draws a 1200 x 630 image with content on it', { skip, timeo
 	execFileSync(PYTHON, [path.join(ROOT, 'ghis.py'), 'demo', '--out', out], { stdio: 'ignore' });
 	const chrome = await openChrome();
 	t.after(chrome.close);
-	const loaded = chrome.next('Page.loadEventFired', 30000);
-	await chrome.send('Page.navigate', { url: pathToFileURL(path.join(out, 'index.html')).href });
-	await loaded;
-	await chrome.send('Runtime.evaluate', { expression: SETTLED, awaitPromise: true });
-	const { result } = await chrome.send('Runtime.evaluate', {
-		returnByValue: true,
-		expression: `(() => {
+	await chrome.open('story', pathToFileURL(path.join(out, 'index.html')).href);
+	await chrome.evaluate(SETTLED);
+	const card = await chrome.evaluate(`(() => {
 			const card = window.ghisShareCard();
 			const pixels = card.getContext('2d').getImageData(0, 0, card.width, card.height).data;
 			let bright = 0;
 			for (let i = 0; i < pixels.length; i += 4 * 31) if (pixels[i] + pixels[i + 1] + pixels[i + 2] > 450) bright++;
 			const preview = document.querySelector('#share-preview');
 			return { width: card.width, height: card.height, bright, preview: preview && preview.src.startsWith('data:image/png') };
-		})()`,
-	});
-	const card = result.value;
+		})()`);
 	assert.deepEqual([card.width, card.height], [1200, 630]);
 	assert.ok(card.bright > 200, `the card looks empty (${card.bright} bright samples)`); // text and tiles drawn
 	assert.ok(card.preview, 'the page shows a preview of the card');

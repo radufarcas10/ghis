@@ -460,6 +460,20 @@ class ServerTests(Isolated):
             403,
         )
 
+    def test_refused_upload_gets_its_answer_not_a_reset(self) -> None:
+        # The client is still sending a large body when the server decides. Answering
+        # without reading it made macOS reset the connection, hiding the 403.
+        _, port = self.start("0.0.0.0")
+        big = json.dumps({"schema": 1, "commits": [], "pad": "x" * 8_000_000}).encode()
+        for headers, expected in (
+            ({**self.JSON, "Origin": "https://evil.example"}, 403),
+            ({"Content-Type": "text/plain"}, 415),
+            (self.JSON, 404),
+        ):
+            with self.subTest(expected=expected):
+                path = "/api/nowhere" if expected == 404 else "/api/upload"
+                self.assertEqual(self.request(port, "POST", path, big, headers)[0], expected)
+
     def test_public_url_decides_same_origin_behind_a_proxy(self) -> None:
         _, port = self.start("0.0.0.0", public_url="https://Stories.example.com/")
         story = json.dumps(demo.make_demo(2, "github")).encode()

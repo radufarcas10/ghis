@@ -44,6 +44,7 @@ from .providers import COLLECTORS, PROVIDERS
 from .site import write_site
 
 DEFAULT_ALLOWED_HOSTS = "github.com,gitlab.com,codeberg.org,bitbucket.org,git.sr.ht"
+UPLOAD_LIMIT = 64_000_000  # bytes of history.json a visitor may upload
 
 
 STATIC = {
@@ -415,11 +416,34 @@ def make_handler(app: GhisServer) -> type[BaseHTTPRequestHandler]:
                 {"Cache-Control": "no-store"},
             )
 
+        def length(self) -> int:
+            """The body's declared size; -1 when the header is not a number."""
+            try:
+                return max(0, int(self.headers.get("Content-Length") or 0))
+            except ValueError:
+                return -1
+
         def body(self, limit: int) -> bytes:
-            length = int(self.headers.get("Content-Length") or 0)
-            if length > limit:
+            length = self.length()
+            if length < 0 or length > limit:
+                self.close_connection = True  # the unread body makes the connection unusable
                 raise InputError(f"Request too large (limit {limit // 1_000_000} MB)")
             return self.rfile.read(length)
+
+        def refuse(self, status: int, message: str) -> None:
+            """Answer a POST without using it. The body is read and thrown away first: closing
+            a connection with unread data makes some systems (macOS) reset it, and the client
+            then sees a dropped connection instead of the reason."""
+            length = self.length()
+            if 0 < length <= UPLOAD_LIMIT:
+                while length > 0:
+                    chunk = self.rfile.read(min(length, 65536))
+                    if not chunk:
+                        break
+                    length -= len(chunk)
+            elif length:
+                self.close_connection = True
+            self.json(status, {"error": message})
 
         def host_ok(self) -> bool:
             # A personal server reads local folders, so it must only answer to names that
@@ -494,11 +518,11 @@ def make_handler(app: GhisServer) -> type[BaseHTTPRequestHandler]:
             path = urllib.parse.urlparse(self.path).path
             content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip()
             if not self.host_ok() or not self.same_origin():
-                self.json(403, {"error": "Cross-site requests are not allowed"})
+                self.refuse(403, "Cross-site requests are not allowed")
                 return
             if content_type != "application/json":
                 # Forces a CORS preflight for any cross-site caller, which this server never grants.
-                self.json(415, {"error": "Send application/json"})
+                self.refuse(415, "Send application/json")
                 return
             try:
                 if path == "/api/jobs":
@@ -512,9 +536,9 @@ def make_handler(app: GhisServer) -> type[BaseHTTPRequestHandler]:
                         raise InputError("Expected a JSON object")
                     self.json(200, app.detect(payload))
                 elif path == "/api/upload":
-                    self.json(201, {"id": app.upload(self.body(64_000_000)).id})
+                    self.json(201, {"id": app.upload(self.body(UPLOAD_LIMIT)).id})
                 else:
-                    self.json(404, {"error": "Not found"})
+                    self.refuse(404, "Not found")
             except InputError as err:
                 self.json(400, {"error": str(err)})
             except ValueError:
