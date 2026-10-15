@@ -89,7 +89,7 @@ class WebsiteTests(unittest.TestCase):
         for ref in self.page.refs:
             if ref.startswith(("http://", "https://", "#", "mailto:")):
                 continue
-            path = ref.split("#")[0]
+            path = ref.split("#")[0].split("?")[0]  # ?v=2 versions, it is not part of the file
             if path in BUILT:
                 continue
             self.assertTrue((SITE / path).exists(), f"site/index.html points at missing {ref}")
@@ -102,6 +102,16 @@ class WebsiteTests(unittest.TestCase):
             if not ref.startswith(("data:", "http")):
                 self.assertTrue((SITE / ref).exists(), f"site.css points at missing {ref}")
 
+    def test_sources_carry_no_hand_written_versions(self) -> None:
+        # Fingerprints (?v=) are added on the way out: by write_site, the server and the Pages
+        # build. A hand-written one in a source file would silently go stale.
+        for page in [
+            *SITE.glob("*.html"),
+            SITE / "site.webmanifest",
+            *(ROOT / "src" / "ghis" / "web").glob("*.html"),
+        ]:
+            self.assertNotIn("?v=", page.read_text(), page.name)
+
     def test_sitemap_manifest_and_404(self) -> None:
         ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9"}
         urls = ET.parse(SITE / "sitemap.xml").getroot().findall("s:url/s:loc", ns)
@@ -109,8 +119,9 @@ class WebsiteTests(unittest.TestCase):
         self.assertEqual(locs, [URL])
         manifest = json.loads((SITE / "site.webmanifest").read_text())
         for icon in manifest["icons"]:
-            if icon["src"] not in BUILT:
-                self.assertTrue((SITE / icon["src"]).exists(), icon["src"])
+            src = icon["src"].split("?")[0]
+            if src not in BUILT:
+                self.assertTrue((SITE / src).exists(), src)
         self.assertIn('content="noindex"', (SITE / "404.html").read_text())
 
     def test_inline_icons_are_text_sized_without_css(self) -> None:
@@ -134,6 +145,7 @@ class WebsiteTests(unittest.TestCase):
     def test_pages_workflow_rewrites_the_address_for_forks(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "pages.yml").read_text()
         self.assertIn(URL, workflow)  # the sed pattern must track the address used above
+        self.assertIn("tools/version_site.py _site", workflow)  # fingerprints, demos included
 
 
 if __name__ == "__main__":

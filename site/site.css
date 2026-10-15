@@ -254,6 +254,8 @@ main { max-width: 1160px; margin: 0 auto; padding: 0 16px; }
 .lost { min-height: 100vh; display: grid; place-content: center; text-align: center; padding: 24px 16px; }
 .lost h1 { margin: 0; font-size: clamp(34px, 7vw, 64px); letter-spacing: -0.04em; line-height: 1.05; }
 .lost .sub { margin-inline: auto; }
+.lost .brand { justify-self: center; margin-bottom: 36px; font-size: 24px; }
+.lost .brand svg { width: 32px; height: 32px; }
 
 /* ------------------------------------------------------------------ responsive & preferences */
 

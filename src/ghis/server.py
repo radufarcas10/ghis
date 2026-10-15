@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from . import git as gitmod
+from .assets import version_refs
 from .collect import collect
 from .common import (
     DATA_DIR,
@@ -421,9 +422,10 @@ def make_handler(app: GhisServer) -> type[BaseHTTPRequestHandler]:
             path = url.path
             if path in STATIC:
                 name, content_type = STATIC[path]
-                self.send(
-                    200, (WEB_DIR / name).read_bytes(), content_type, {"Cache-Control": "no-cache"}
-                )
+                body = (WEB_DIR / name).read_bytes()
+                if content_type.startswith("text/html"):
+                    body = version_refs(body.decode("utf-8"), WEB_DIR).encode("utf-8")
+                self.send(200, body, content_type, {"Cache-Control": "no-cache"})
             elif path == "/data.js":  # the offline page's data file; empty when hosted
                 self.send(200, b"", "text/javascript; charset=utf-8")
             elif path == "/healthz":

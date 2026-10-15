@@ -83,6 +83,16 @@ page (`web/lib.js`, `web/app.js`). The file keeps raw facts only.
 straight from disk (`out/index.html`), and browsers block module scripts on `file://`. The
 small wrapper at the top of `lib.js` lets the same file load in the browser and in Node.
 
+## Caching
+
+Never write `?v=` into a source file. Every reference to a local file (scripts, styles, icons,
+the manifest, a story's `data.js`) gets a fingerprint of that file's contents on its way out
+(`style.css?v=3f9a1c02`): `site.write_site` stamps stories written to disk, the server stamps
+the pages it sends, and the Pages workflow runs `tools/version_site.py` over the whole website,
+demos and 404 page included. An address changes exactly when its file does, so browsers never
+pair a new page with a stale script or icon (tab icons are cached especially stubbornly).
+The logic is `src/ghis/assets.py`; a test fails if a source file carries a hand-written tag.
+
 ## The website
 
 `site/` is the project website. [`.github/workflows/pages.yml`](.github/workflows/pages.yml)
@@ -104,8 +114,7 @@ The mark lives in `src/ghis/web/favicon.svg`: three rising bars, topped up to on
 contribution-grid squares in darker shades. A single-color copy is inlined in the page
 headers (`site/index.html`, `src/ghis/web/index.html`, `connect.html`), with the squares as
 semi-transparent cut-outs, and `drawLogo()` in `web/app.js` draws it on the share card. After
-changing it, update those copies and `tools/brand/icon.html` / `og.html`, then rebuild every
-image that contains it (app icons, the link-preview image, the README's share card):
+changing it, update those copies and `tools/brand/icon.html` / `og.html`, then rebuild every image that contains it (app icons, the link-preview image, the README's share card):
 
 ```bash
 tools/brand/build.sh     # needs Chrome and Node 22+

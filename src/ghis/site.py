@@ -8,6 +8,7 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
+from .assets import version_file
 from .common import WEB_DIR, WEB_FILES, log
 
 
@@ -21,6 +22,9 @@ def write_site(data: dict[str, Any], out: Path, open_browser: bool) -> None:
     # A script rather than fetch(), because browsers block fetch() on file:// pages.
     (out / "data.js").write_text(f"window.GHIS_DATA = {payload};\n", encoding="utf-8")
     page = out / "index.html"
+    # Fingerprint the page's scripts, styles, icon and data (data.js?v=…), so reopening an
+    # updated story never mixes it with files cached from the last one.
+    version_file(page)
     log(f"Done. Open {page}")
     if open_browser:
         webbrowser.open(page.as_uri())

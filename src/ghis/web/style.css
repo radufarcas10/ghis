@@ -181,6 +181,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 	max-width: 100%;
 }
 .years::-webkit-scrollbar { display: none; }
+.years:empty { display: none; }
 
 .pill {
 	border: 0; background: transparent; cursor: pointer; white-space: nowrap;

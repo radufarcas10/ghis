@@ -6,6 +6,7 @@ import argparse
 import http.client
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,8 +17,8 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from ghis import assets, common, demo, detect, git, server, site  # noqa: E402
 from ghis import collect as collect_mod  # noqa: E402
-from ghis import common, demo, detect, git, server, site  # noqa: E402
 
 
 def make_repo(root: Path, name: str) -> Path:
@@ -176,6 +177,57 @@ def collect_args(**overrides: object) -> argparse.Namespace:
     return argparse.Namespace(**base)
 
 
+class AssetVersionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        (self.root / "app.js").write_text("one")
+        (self.root / "demo").mkdir()
+        (self.root / "demo" / "style.css").write_text("two")
+
+    def test_local_references_get_a_fingerprint_of_their_contents(self) -> None:
+        html = (
+            '<script src="app.js"></script><link href="demo/style.css?v=old" rel="stylesheet">'
+            '<a href="https://github.com/x/y.js">x</a><img src="data:image/png;base64,AA">'
+            '<script src="missing.js"></script><a href="#top">top</a>'
+            '<script src="api/x.js"></script>'
+        )
+        out = assets.version_refs(html, self.root)
+        self.assertIn(f'src="app.js?v={assets.fingerprint(self.root / "app.js")}"', out)
+        self.assertIn(
+            f'href="demo/style.css?v={assets.fingerprint(self.root / "demo" / "style.css")}"', out
+        )
+        for untouched in (
+            'href="https://github.com/x/y.js"',
+            'src="data:image/png;base64,AA"',
+            'src="missing.js"',
+            'href="#top"',
+            'src="api/x.js"',
+        ):
+            self.assertIn(untouched, out)
+
+    def test_the_fingerprint_changes_exactly_when_the_file_does(self) -> None:
+        before = assets.version_refs('<script src="app.js"></script>', self.root)
+        self.assertEqual(before, assets.version_refs('<script src="app.js"></script>', self.root))
+        (self.root / "app.js").write_text("one, changed")
+        self.assertNotEqual(
+            before, assets.version_refs('<script src="app.js"></script>', self.root)
+        )
+
+    def test_a_built_site_including_absolute_links_and_manifest(self) -> None:
+        (self.root / "icon.png").write_bytes(b"png")
+        (self.root / "site.webmanifest").write_text('{"icons": [{"src": "icon.png"}]}')
+        (self.root / "404.html").write_text('<link href="https://example.test/site/app.js">')
+        (self.root / "index.html").write_text('<link rel="manifest" href="site.webmanifest">')
+        assets.version_tree(self.root, "https://example.test/site/")
+        manifest = (self.root / "site.webmanifest").read_text()
+        self.assertIn(f'"src": "icon.png?v={assets.fingerprint(self.root / "icon.png")}"', manifest)
+        self.assertIn("app.js?v=", (self.root / "404.html").read_text())
+        # Pages fingerprint the manifest as it ends up, icons stamped.
+        stamp = assets.fingerprint(self.root / "site.webmanifest")
+        self.assertIn(f"site.webmanifest?v={stamp}", (self.root / "index.html").read_text())
+
+
 class CollectTests(Isolated):
     @classmethod
     def setUpClass(cls) -> None:
@@ -287,6 +339,9 @@ class CollectTests(Isolated):
     def test_demo_and_site_render(self) -> None:
         out = self.root / "site"
         site.write_site(demo.make_demo(1, "gitlab"), out, False)
+        page = (out / "index.html").read_text()
+        for name in ("style.css", "lib.js", "app.js", "data.js", "favicon.svg"):
+            self.assertIn(f"{name}?v={assets.fingerprint(out / name)}", page)
         for name in common.WEB_FILES + ("data.js", "history.json"):
             self.assertTrue((out / name).exists(), name)
         data = json.loads((out / "history.json").read_text())
@@ -342,6 +397,9 @@ class ServerTests(Isolated):
         self.assertFalse(config["personal"])
         self.assertIn("github.com", config["allowedHosts"])
         self.assertEqual(self.request(port, "GET", "/")[0], 200)
+        # Pages leave the server with fingerprinted assets, against the files it serves.
+        html = self.request(port, "GET", "/")[1]["raw"].decode()
+        self.assertIn(f"connect.js?v={assets.fingerprint(common.WEB_DIR / 'connect.js')}", html)
         self.assertEqual(self.request(port, "GET", "/../ghis.py")[0], 404)
 
     def test_post_requires_json_and_same_origin(self) -> None:
