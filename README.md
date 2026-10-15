@@ -25,8 +25,16 @@ You need **Python 3.9+** and **git 2.31+**. Check with `python3 --version` and `
 ```bash
 git clone https://github.com/radufarcas10/ghis.git
 cd ghis
-python3 ghis.py
+python3 ghis.py        # on Windows: py ghis.py
 ```
+
+It works the same on Linux, macOS and Windows. Two things differ:
+
+- **Windows** runs Python as `py` (or `python`), not `python3`. Install git from
+  [git-scm.com](https://git-scm.com) if you don't have it.
+- **macOS** may ask whether Terminal can open your Desktop, Documents or Downloads folders
+  the first time ghis looks for checkouts. Allow it, or checkouts there won't be found. The app
+  opens at `localhost` instead of `ghis.localhost`, because Safari doesn't resolve `.localhost` names.
 
 Your browser opens at <http://ghis.localhost:8080>, or the next free port if another app uses 8080.
 (On a Mac it opens <http://localhost:8080>: Safari does not resolve `.localhost` names.)
@@ -112,6 +120,7 @@ Everything the app does is also available as a command, which suits scripts and 
 
 ```bash
 # GitHub, GitLab or Codeberg: put the token in the environment
+# (Windows PowerShell: $env:GITHUB_TOKEN="..."; py ghis.py collect --provider github --open)
 GITHUB_TOKEN=... python3 ghis.py collect --provider github --open
 GITLAB_TOKEN=... python3 ghis.py collect --provider gitlab --url https://gitlab.example.com --open
 GITEA_TOKEN=...  python3 ghis.py collect --provider gitea --url https://codeberg.org --open

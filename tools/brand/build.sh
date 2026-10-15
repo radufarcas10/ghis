@@ -5,7 +5,13 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
-chrome="${GHIS_CHROME:-google-chrome}"
+chrome="${GHIS_CHROME:-}"
+if [ -z "$chrome" ]; then
+	for candidate in google-chrome google-chrome-stable chromium "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; do
+		if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then chrome="$candidate"; break; fi
+	done
+fi
+[ -n "$chrome" ] || { echo "Chrome not found: set GHIS_CHROME to its path" >&2; exit 1; }
 
 shot() { # <page> <width> <height> <scale> <out>
 	"$chrome" --headless=new --disable-gpu --no-sandbox --hide-scrollbars --window-size="$2,$3" \

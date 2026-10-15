@@ -41,7 +41,7 @@ def pick_provider(args: argparse.Namespace) -> str:
 
 def read_token(args: argparse.Namespace, provider: str) -> str | None:
     if args.token_file:
-        return Path(args.token_file).expanduser().read_text().strip() or None
+        return Path(args.token_file).expanduser().read_text(encoding="utf-8").strip() or None
     return os.environ.get(PROVIDERS[provider]["token_env"]) or os.environ.get("GHIS_TOKEN")
 
 

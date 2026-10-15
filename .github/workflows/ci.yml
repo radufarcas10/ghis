@@ -20,23 +20,41 @@ jobs:
       - run: ruff format --check .
 
   python:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        # Every supported Python on Linux; the oldest and newest on macOS and Windows.
+        os: [ubuntu-latest]
         python: ["3.9", "3.11", "3.13"]
+        include:
+          - { os: macos-latest, python: "3.9", arch: x64 } # no native arm64 build; runs under Rosetta
+          - { os: macos-latest, python: "3.13" }
+          - { os: windows-latest, python: "3.9" }
+          - { os: windows-latest, python: "3.13" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      # Includes the headless-Chrome tests: GitHub's Ubuntu runners ship Chrome.
+          architecture: ${{ matrix.arch }}
+      # Includes the headless-Chrome tests: GitHub's runners ship Chrome on all three systems.
       - run: python -m unittest discover tests -v
 
   javascript:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash # globs and loops work the same on Windows (Git Bash)
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5 # the phone-layout test builds a demo story with Python
+        with:
+          python-version: "3.12"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -44,7 +62,14 @@ jobs:
       - run: node --test tests/js/*.test.js
 
   package:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

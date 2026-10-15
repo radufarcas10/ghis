@@ -7,7 +7,9 @@ import fnmatch
 import os
 import re
 import shutil
+import stat
 import subprocess
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -238,6 +240,20 @@ def clone_env(token: str | None, clone_user: str, restricted: bool) -> dict[str,
     return env
 
 
+def remove_tree(path: Path) -> None:
+    """shutil.rmtree that also deletes read-only files: git marks its objects read-only on
+    Windows, where a plain rmtree stops with "access denied"."""
+
+    def retry(func: Any, target: str, *_: Any) -> None:
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=retry)
+    else:
+        shutil.rmtree(path, onerror=retry)
+
+
 def sync_clone(project: dict[str, Any], cache: Path, via: str, env: dict[str, str]) -> Path:
     dest = cache / (re.sub(r"[^\w.-]+", "__", project["path"]) + ".git")
     url = clone_url(project, via)
@@ -261,7 +277,7 @@ def sync_clone(project: dict[str, Any], cache: Path, via: str, env: dict[str, st
     else:
         partial = dest.with_suffix(".partial")
         if partial.exists():
-            shutil.rmtree(partial)
+            remove_tree(partial)
         git(["clone", "--bare", "--quiet", url, str(partial)], env=env)
         partial.rename(dest)
     return dest

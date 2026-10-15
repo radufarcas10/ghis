@@ -5,16 +5,28 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn, execFileSync, spawnSync } = require('node:child_process');
-const { mkdtempSync, rmSync, readFileSync } = require('node:fs');
+const { mkdtempSync, rmSync, readFileSync, existsSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const CHROME = process.env.GHIS_CHROME
-	|| ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']
-		.find((name) => spawnSync('which', [name]).status === 0);
-const PYTHON = ['python3', 'python'].find((name) => spawnSync(name, ['--version']).status === 0);
+// Chrome or Chromium on Linux, macOS or Windows; GHIS_CHROME wins.
+function findChrome() {
+	if (process.env.GHIS_CHROME) return process.env.GHIS_CHROME;
+	const dirs = (process.env.PATH || '').split(path.delimiter);
+	for (const name of ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']) {
+		for (const dir of dirs) if (existsSync(path.join(dir, name))) return path.join(dir, name);
+	}
+	return [
+		'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+		'/Applications/Chromium.app/Contents/MacOS/Chromium',
+		...[process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA]
+			.filter(Boolean).map((base) => path.join(base, 'Google', 'Chrome', 'Application', 'chrome.exe')),
+	].find((candidate) => existsSync(candidate));
+}
+const CHROME = findChrome();
+const PYTHON = ['python3', 'python', 'py'].find((name) => spawnSync(name, ['--version']).status === 0);
 const skip = !CHROME ? 'no Chrome or Chromium found'
 	: !PYTHON ? 'no Python found'
 		: typeof WebSocket === 'undefined' ? 'needs Node 22+ (global WebSocket)' : false;
@@ -28,7 +40,7 @@ async function openChrome() {
 	// Port 0: Chrome picks a free port and writes it to DevToolsActivePort, so no collisions.
 	const proc = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0', '--no-first-run',
 		'--no-default-browser-check', '--no-sandbox', '--disable-gpu', `--user-data-dir=${profile}`,
-		'about:blank'], { stdio: 'ignore', detached: true });
+		'about:blank'], { stdio: 'ignore', detached: process.platform !== 'win32' });
 	// `google-chrome` is a launcher script: the browser and its helpers are its children.
 	// Their own process group lets one signal stop them all.
 	let port;

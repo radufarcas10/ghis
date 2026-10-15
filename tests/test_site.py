@@ -44,7 +44,7 @@ class Page(HTMLParser):
 class WebsiteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.html = (SITE / "index.html").read_text()
+        cls.html = (SITE / "index.html").read_text(encoding="utf-8")
         cls.page = Page(cls.html)
 
     def test_title_and_description_fit_search_results(self) -> None:
@@ -96,7 +96,7 @@ class WebsiteTests(unittest.TestCase):
 
     def test_every_stylesheet_reference_exists(self) -> None:
         # A missing mask image (the footer logo) fails silently: the element just disappears.
-        css = (SITE / "site.css").read_text()
+        css = (SITE / "site.css").read_text(encoding="utf-8")
         for ref in re.findall(r"url\(([^)]+)\)", css):
             ref = ref.strip("'\"")
             if not ref.startswith(("data:", "http")):
@@ -110,19 +110,19 @@ class WebsiteTests(unittest.TestCase):
             SITE / "site.webmanifest",
             *(ROOT / "src" / "ghis" / "web").glob("*.html"),
         ]:
-            self.assertNotIn("?v=", page.read_text(), page.name)
+            self.assertNotIn("?v=", page.read_text(encoding="utf-8"), page.name)
 
     def test_sitemap_manifest_and_404(self) -> None:
         ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9"}
         urls = ET.parse(SITE / "sitemap.xml").getroot().findall("s:url/s:loc", ns)
         locs = [el.text for el in urls]
         self.assertEqual(locs, [URL])
-        manifest = json.loads((SITE / "site.webmanifest").read_text())
+        manifest = json.loads((SITE / "site.webmanifest").read_text(encoding="utf-8"))
         for icon in manifest["icons"]:
             src = icon["src"].split("?")[0]
             if src not in BUILT:
                 self.assertTrue((SITE / src).exists(), src)
-        self.assertIn('content="noindex"', (SITE / "404.html").read_text())
+        self.assertIn('content="noindex"', (SITE / "404.html").read_text(encoding="utf-8"))
 
     def test_inline_icons_are_text_sized_without_css(self) -> None:
         # An SVG without its own size fills its container whenever its CSS is missing or stale
@@ -135,15 +135,15 @@ class WebsiteTests(unittest.TestCase):
             ROOT / "src" / "ghis" / "web" / "connect.js",
         ]
         for page in pages:
-            for svg in re.findall(r"<svg\b[^>]*>", page.read_text()):
+            for svg in re.findall(r"<svg\b[^>]*>", page.read_text(encoding="utf-8")):
                 self.assertIn("width=", svg, f"{page.name}: {svg[:60]}")
 
     def test_stories_stay_out_of_search_results(self) -> None:
-        story = (ROOT / "src" / "ghis" / "web" / "index.html").read_text()
+        story = (ROOT / "src" / "ghis" / "web" / "index.html").read_text(encoding="utf-8")
         self.assertIn('<meta name="robots" content="noindex, nofollow">', story)
 
     def test_pages_workflow_rewrites_the_address_for_forks(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "pages.yml").read_text()
+        workflow = (ROOT / ".github" / "workflows" / "pages.yml").read_text(encoding="utf-8")
         self.assertIn(URL, workflow)  # the sed pattern must track the address used above
         self.assertIn("tools/version_site.py _site", workflow)  # fingerprints, demos included
 

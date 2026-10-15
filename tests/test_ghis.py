@@ -51,23 +51,23 @@ def make_repo(root: Path, name: str) -> Path:
         )
 
     lines = [f"value_{i} = {i}" for i in range(10)]
-    (repo / "app.py").write_text("\n".join(lines) + "\n")
-    (repo / "package-lock.json").write_text("{}\n" * 500)
+    (repo / "app.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (repo / "package-lock.json").write_text("{}\n" * 500, encoding="utf-8")
     commit("APP-1 Add app", "me@example.com", "2024-03-04T10:00:00+02:00")
     (repo / "src").mkdir()
     (repo / "app.py").rename(repo / "src" / "main.py")
     lines[3] = "value_3 = 'changed'"
-    (repo / "src" / "main.py").write_text("\n".join(lines) + "\n")
+    (repo / "src" / "main.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
     commit("Move app into src", "ME@Example.com", "2024-03-05T23:30:00+02:00")
-    (repo / "other.js").write_text("x\n")
+    (repo / "other.js").write_text("x\n", encoding="utf-8")
     commit("Someone else's work", "them@example.com", "2024-03-06T09:00:00+02:00")
-    (repo / "pair.js").write_text("pair\n")
+    (repo / "pair.js").write_text("pair\n", encoding="utf-8")
     commit(
         "Pair on the parser\n\nCo-authored-by: Me <me@example.com>",
         "them@example.com",
         "2024-03-07T11:00:00+02:00",
     )
-    (repo / "thanks.js").write_text("thanks\n")
+    (repo / "thanks.js").write_text("thanks\n", encoding="utf-8")
     commit(
         "Credit an idea\n\nThanks to me@example.com for it.",
         "them@example.com",
@@ -85,6 +85,7 @@ class Isolated(unittest.TestCase):
         cls.root = Path(cls.tmp.name)
         cls.env = {
             "HOME": str(cls.root),
+            "USERPROFILE": str(cls.root),  # what Path.home() reads on Windows
             "GIT_CONFIG_NOSYSTEM": "1",
             "XDG_CONFIG_HOME": str(cls.root),
         }
@@ -181,9 +182,9 @@ class AssetVersionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.root, True)
-        (self.root / "app.js").write_text("one")
+        (self.root / "app.js").write_text("one", encoding="utf-8")
         (self.root / "demo").mkdir()
-        (self.root / "demo" / "style.css").write_text("two")
+        (self.root / "demo" / "style.css").write_text("two", encoding="utf-8")
 
     def test_local_references_get_a_fingerprint_of_their_contents(self) -> None:
         html = (
@@ -209,23 +210,31 @@ class AssetVersionTests(unittest.TestCase):
     def test_the_fingerprint_changes_exactly_when_the_file_does(self) -> None:
         before = assets.version_refs('<script src="app.js"></script>', self.root)
         self.assertEqual(before, assets.version_refs('<script src="app.js"></script>', self.root))
-        (self.root / "app.js").write_text("one, changed")
+        (self.root / "app.js").write_text("one, changed", encoding="utf-8")
         self.assertNotEqual(
             before, assets.version_refs('<script src="app.js"></script>', self.root)
         )
 
     def test_a_built_site_including_absolute_links_and_manifest(self) -> None:
         (self.root / "icon.png").write_bytes(b"png")
-        (self.root / "site.webmanifest").write_text('{"icons": [{"src": "icon.png"}]}')
-        (self.root / "404.html").write_text('<link href="https://example.test/site/app.js">')
-        (self.root / "index.html").write_text('<link rel="manifest" href="site.webmanifest">')
+        (self.root / "site.webmanifest").write_text(
+            '{"icons": [{"src": "icon.png"}]}', encoding="utf-8"
+        )
+        (self.root / "404.html").write_text(
+            '<link href="https://example.test/site/app.js">', encoding="utf-8"
+        )
+        (self.root / "index.html").write_text(
+            '<link rel="manifest" href="site.webmanifest">', encoding="utf-8"
+        )
         assets.version_tree(self.root, "https://example.test/site/")
-        manifest = (self.root / "site.webmanifest").read_text()
+        manifest = (self.root / "site.webmanifest").read_text(encoding="utf-8")
         self.assertIn(f'"src": "icon.png?v={assets.fingerprint(self.root / "icon.png")}"', manifest)
-        self.assertIn("app.js?v=", (self.root / "404.html").read_text())
+        self.assertIn("app.js?v=", (self.root / "404.html").read_text(encoding="utf-8"))
         # Pages fingerprint the manifest as it ends up, icons stamped.
         stamp = assets.fingerprint(self.root / "site.webmanifest")
-        self.assertIn(f"site.webmanifest?v={stamp}", (self.root / "index.html").read_text())
+        self.assertIn(
+            f"site.webmanifest?v={stamp}", (self.root / "index.html").read_text(encoding="utf-8")
+        )
 
 
 class CollectTests(Isolated):
@@ -310,7 +319,7 @@ class CollectTests(Isolated):
     def test_last_fetch_reads_fetch_head(self) -> None:
         self.assertIsNone(git.last_fetch(str(self.repo)))
         head = self.repo / ".git" / "FETCH_HEAD"
-        head.write_text("")
+        head.write_text("", encoding="utf-8")
         self.addCleanup(head.unlink)
         self.assertRegex(git.last_fetch(str(self.repo)), r"^\d{4}-\d\d-\d\dT")
 
@@ -366,12 +375,12 @@ class CollectTests(Isolated):
     def test_demo_and_site_render(self) -> None:
         out = self.root / "site"
         site.write_site(demo.make_demo(1, "gitlab"), out, False)
-        page = (out / "index.html").read_text()
+        page = (out / "index.html").read_text(encoding="utf-8")
         for name in ("style.css", "lib.js", "app.js", "data.js", "favicon.svg"):
             self.assertIn(f"{name}?v={assets.fingerprint(out / name)}", page)
         for name in common.WEB_FILES + ("data.js", "history.json"):
             self.assertTrue((out / name).exists(), name)
-        data = json.loads((out / "history.json").read_text())
+        data = json.loads((out / "history.json").read_text(encoding="utf-8"))
         self.assertGreater(len(data["commits"]), 100)
 
 
@@ -528,6 +537,8 @@ class CliTests(Isolated):
             [sys.executable, self.LAUNCHER, *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             env={**os.environ, "GHIS_HOME": str(self.root)},
         )
@@ -556,6 +567,8 @@ class CliTests(Isolated):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env={**os.environ, "GHIS_HOME": str(self.root)},
         )
         self.addCleanup(proc.wait, 10)

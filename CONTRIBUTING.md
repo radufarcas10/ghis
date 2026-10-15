@@ -16,13 +16,13 @@ Requirements: Python 3.9+ and git 2.31+. The development tools below are optiona
 
 ## Tests and checks
 
-CI runs all of these on every push ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+CI runs all of these on every push, on Linux, macOS and Windows ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 | What | Command | Needs |
 |---|---|---|
 | Python tests | `python3 -m unittest discover tests` | nothing |
 | JavaScript tests | `node --test tests/js/*.test.js` | Node 22+; the phone-layout test also needs Chrome and Python |
-| Browser tests | included in the Python tests | Chrome or Chromium, else skipped (`GHIS_CHROME=/path` to point at one) |
+| Browser tests | included in the Python tests | Chrome or Chromium (found in the usual places on Linux, macOS and Windows), else skipped; `GHIS_CHROME=/path` to point at one |
 | Lint and format | `ruff check . && ruff format --check .` | `pipx install ruff` |
 | Docker image | `docker build -t ghis . && docker run -p 8080:8080 ghis` | Docker |
 
@@ -117,7 +117,7 @@ semi-transparent cut-outs, and `drawLogo()` in `web/app.js` draws it on the shar
 changing it, update those copies and `tools/brand/icon.html` / `og.html`, then rebuild every image that contains it (app icons, the link-preview image, the README's share card):
 
 ```bash
-tools/brand/build.sh     # needs Chrome and Node 22+
+tools/brand/build.sh     # needs Chrome, Node 22+ and bash (Git Bash or WSL on Windows)
 ```
 
 The README screenshots (`docs/story.png`, `docs/app.png`) come from sample data only: the app

@@ -5,7 +5,13 @@
 # Needs Chrome (or GHIS_CHROME). Run from anywhere: tools/screenshots.sh
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-chrome="${GHIS_CHROME:-google-chrome}"
+chrome="${GHIS_CHROME:-}"
+if [ -z "$chrome" ]; then
+	for candidate in google-chrome google-chrome-stable chromium "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; do
+		if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then chrome="$candidate"; break; fi
+	done
+fi
+[ -n "$chrome" ] || { echo "Chrome not found: set GHIS_CHROME to its path" >&2; exit 1; }
 work="$(mktemp -d)"
 trap 'kill "$server" 2>/dev/null || true; rm -rf "$work"' EXIT
 

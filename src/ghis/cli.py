@@ -63,6 +63,11 @@ def cmd_demo(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")  # an odd character never crashes ghis
+        except (AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(
         prog="ghis", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

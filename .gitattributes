@@ -1,0 +1,5 @@
+# Same bytes on every OS: Windows checkouts would otherwise turn line endings into CRLF,
+# breaking the shell scripts and text comparisons in the tests.
+* text=auto eol=lf
+*.png binary
+*.ico binary

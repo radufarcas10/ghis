@@ -19,14 +19,31 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from ghis import demo, server, site  # noqa: E402
 
-CHROME = os.environ.get("GHIS_CHROME") or next(
-    (
-        path
-        for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")
-        if (path := shutil.which(name))
-    ),
-    None,
-)
+
+def find_chrome() -> str | None:
+    """Chrome or Chromium on Linux, macOS or Windows; GHIS_CHROME wins."""
+    if os.environ.get("GHIS_CHROME"):
+        return os.environ["GHIS_CHROME"]
+    for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"):
+        if path := shutil.which(name):
+            return path
+    candidates = [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        *(
+            str(Path(base) / "Google" / "Chrome" / "Application" / "chrome.exe")
+            for base in (
+                os.environ.get("PROGRAMFILES"),
+                os.environ.get("PROGRAMFILES(X86)"),
+                os.environ.get("LOCALAPPDATA"),
+            )
+            if base
+        ),
+    ]
+    return next((c for c in candidates if Path(c).is_file()), None)
+
+
+CHROME = find_chrome()
 SECTIONS = (
     "calendar",
     "months",
@@ -59,6 +76,8 @@ def render(url: str) -> str:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=90,
     )
     return proc.stdout

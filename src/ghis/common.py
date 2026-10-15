@@ -86,6 +86,6 @@ def host_allowed(host: str | None, allowed: set[str] | None) -> bool:
 def tilde(path: Path) -> str:
     """Show a path under the home folder as ~/..., the way people type it."""
     try:
-        return "~/" + str(path.relative_to(Path.home()))
+        return "~/" + path.relative_to(Path.home()).as_posix()  # one separator on every OS
     except ValueError:
         return str(path)

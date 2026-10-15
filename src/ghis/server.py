@@ -11,7 +11,6 @@ import json
 import os
 import re
 import secrets
-import shutil
 import sys
 import tempfile
 import threading
@@ -40,7 +39,7 @@ from .common import (
 )
 from .demo import make_demo
 from .detect import detect_identity, discover_cached, find_token, suggest_url
-from .git import HOME_DEPTH
+from .git import HOME_DEPTH, remove_tree
 from .providers import COLLECTORS, PROVIDERS
 from .site import write_site
 
@@ -285,7 +284,10 @@ class GhisServer:
             _sink.job = None
             token = None
             if not self.personal:
-                shutil.rmtree(cache, ignore_errors=True)
+                try:
+                    remove_tree(cache)
+                except OSError:
+                    pass  # a file still locked (Windows); the temp folder gets swept later
             self.slots.release()
 
     def fill_in(
