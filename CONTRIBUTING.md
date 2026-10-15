@@ -98,6 +98,27 @@ python3 -m http.server -d _site 8000     # http://localhost:8000
 Repository links on the site fill themselves in from the `<owner>.github.io/<repo>` address,
 so nothing needs editing after a fork or rename.
 
+## The logo
+
+The mark lives in `src/ghis/web/favicon.svg`: three rising bars, topped up to one height by
+contribution-grid squares in darker shades. A single-color copy is inlined in the page
+headers (`site/index.html`, `src/ghis/web/index.html`, `connect.html`), with the squares as
+semi-transparent cut-outs, and `drawLogo()` in `web/app.js` draws it on the share card. After
+changing it, update those copies and `tools/brand/icon.html` / `og.html`, then rebuild every
+image that contains it (app icons, the link-preview image, the README's share card):
+
+```bash
+tools/brand/build.sh     # needs Chrome and Node 22+
+```
+
+The README screenshots (`docs/story.png`, `docs/app.png`) come from sample data only: the app
+one runs ghis against a throwaway home folder with two demo repositories, so the "what we
+found" panel never shows a real computer. Rebuild them after a visible UI change:
+
+```bash
+tools/screenshots.sh     # needs Chrome
+```
+
 ## Adding a provider
 
 1. Add `src/ghis/providers/<name>.py` with `collect_<name>(url, token, args, warnings)`.

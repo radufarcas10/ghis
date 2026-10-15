@@ -735,14 +735,21 @@
 		ctx.closePath();
 	}
 
-	// The ghis mark: a rounded square with three rising bars, as in favicon.svg.
+	// The ghis mark, as in favicon.svg: three rising bars topped up to the same height by
+	// contribution-grid squares, in a rounded square. Squares are the bars' color, fainter.
 	function drawLogo(ctx, x, y, size, square, bars) {
 		const k = size / 32;
 		ctx.fillStyle = square;
 		roundRect(ctx, x, y, size, size, 8 * k);
 		ctx.fill();
 		ctx.fillStyle = bars;
-		for (const [bx, by, bh] of [[6, 18, 8], [13.5, 11, 15], [21, 6, 20]]) {
+		ctx.globalAlpha = 0.45;
+		for (const [bx, by] of [[6, 6], [6, 12], [13.5, 6]]) {
+			roundRect(ctx, x + bx * k, y + by * k, 5 * k, 5 * k, 1.2 * k);
+			ctx.fill();
+		}
+		ctx.globalAlpha = 1;
+		for (const [bx, by, bh] of [[6, 18, 8], [13.5, 12, 14], [21, 6, 20]]) {
 			roundRect(ctx, x + bx * k, y + by * k, 5 * k, bh * k, 1.5 * k);
 			ctx.fill();
 		}
