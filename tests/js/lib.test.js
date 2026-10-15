@@ -306,3 +306,12 @@ test('anonymize keeps the numbers and drops what was asked', () => {
 	assert.equal(messagesOnly.projects[0].path, 'acme/web');
 	assert.equal(messagesOnly.commits[0].s, '');
 });
+
+test('year-in-review season runs from December 1 to January 15', () => {
+	assert.equal(lib.reviewSeason('2026-12-01'), '2026');
+	assert.equal(lib.reviewSeason('2026-12-31'), '2026');
+	assert.equal(lib.reviewSeason('2027-01-15'), '2026');
+	assert.equal(lib.reviewSeason('2027-01-16'), null);
+	assert.equal(lib.reviewSeason('2026-11-30'), null);
+	assert.equal(lib.reviewSeason('2026-06-10'), null);
+});

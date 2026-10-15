@@ -267,6 +267,13 @@ main { max-width: 1120px; margin: 0 auto; padding: 0 16px 80px; }
 	to { transform: translate3d(40px, 30px, 0) scale(1.12); }
 }
 
+.season-chip {
+	display: table; margin: 0 auto 22px; padding: 8px 16px; border-radius: 999px; text-decoration: none;
+	background: linear-gradient(100deg, color-mix(in srgb, var(--s1) 18%, var(--surface)), color-mix(in srgb, #6250d6 18%, var(--surface)));
+	border: 1px solid var(--border); color: var(--ink); font-size: 14px; font-weight: 600; animation: rise 0.8s var(--ease) both;
+}
+.season-chip:hover { box-shadow: var(--shadow); }
+
 .monogram {
 	display: inline-grid; place-items: center; width: 72px; height: 72px; border-radius: 22px;
 	background: var(--ink); color: var(--page); font-weight: 700; font-size: 28px; letter-spacing: -0.03em;

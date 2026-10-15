@@ -29,4 +29,6 @@ shot og.html 1200 630 1 "$root/site/og.png"
 story="$(mktemp -d)"
 python3 "$root/ghis.py" demo --provider github --out "$story" >/dev/null 2>&1
 node "$here/share-card.mjs" "file://$story/index.html#$(date +%Y)" "$root/docs/share-card.png"
+cp "$root/docs/share-card.png" "$root/site/share-card.png"  # the website's "Post your year" example
+echo "saved site/share-card.png"
 rm -rf "$story"

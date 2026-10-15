@@ -380,6 +380,15 @@
 		};
 	}
 
+	// Year-in-review season, December 1 to January 15: the year worth reviewing on `day`
+	// ("YYYY-MM-DD"), or null the rest of the year.
+	function reviewSeason(day) {
+		const [y, m, d] = String(day).split('-').map(Number);
+		if (m === 12) return String(y);
+		if (m === 1 && d <= 15) return String(y - 1);
+		return null;
+	}
+
 	// Signed whole-percent change, or null when there is no base to compare with.
 	function delta(current, before) {
 		return before ? Math.round(((current - before) / before) * 100) : null;
@@ -475,6 +484,6 @@
 		esc, safeUrl, num, pct, plural, utc, fmtDay, monthFmt, monthShort, addDays, daysBetween,
 		weekdayOf, WEEKDAYS, WEEKDAYS_LONG, hourLabel, clamp, duration, median, initials,
 		vocabulary, actionLabels, contributionCount, STOPWORDS, createModel, persona, niceTicks, columnPath,
-		offsetOf, localizeActivity, delta, anonymize, SITE_URL,
+		offsetOf, localizeActivity, delta, anonymize, SITE_URL, reviewSeason,
 	};
 });

@@ -13,6 +13,7 @@
 		esc, safeUrl, num, pct, plural, utc, fmtDay, monthFmt, monthShort, addDays, daysBetween,
 		weekdayOf, WEEKDAYS, WEEKDAYS_LONG, hourLabel, clamp, duration, median, initials,
 		vocabulary, actionLabels, createModel, persona, niceTicks, columnPath, delta, anonymize, SITE_URL,
+		reviewSeason,
 	} = window.GhisLib;
 
 	// ------------------------------------------------------------ data loading
@@ -306,7 +307,13 @@
 		if (has.has('requests')) tiles.push([`${V.REQS} merged`, counter('merged', s.merged.length), `${num(s.reqs.length)} opened`, b && b.merged.length, s.merged.length]);
 		if (has.has('reviews')) tiles.push(['Reviews', counter('reviews', s.revs.length), has.has('approvals') ? `${num(s.events.approved || 0)} approvals` : '', b && b.revs.length, s.revs.length]);
 
+		// In year-in-review season (judged by the story's own date; ?season=2026 previews it),
+		// point at the year to review unless it is already on screen.
+		const seasonYear = query.get('season') || reviewSeason(generatedDay);
+		const season = seasonYear && years.includes(seasonYear) && s.range !== seasonYear
+			? `<a class="season-chip" href="#${seasonYear}"><span aria-hidden="true">🎆</span> See your ${seasonYear} in code <span aria-hidden="true">→</span></a>` : '';
 		return `<section class="hero">
+			${season}
 			<div class="monogram" aria-hidden="true">${esc(initials(user.name || user.username))}</div>
 			<p class="eyebrow">${eyebrow}</p>
 			<h1>${esc(user.name || user.username || 'Your history')}</h1>

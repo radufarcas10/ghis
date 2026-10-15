@@ -17,7 +17,8 @@
 
 	for (const button of document.querySelectorAll('[data-copy]')) {
 		button.addEventListener('click', async () => {
-			const text = document.getElementById(button.dataset.copy).textContent.replace(/^\$ /gm, '');
+			// innerText: only the chosen system's lines, without the $ or > prompts.
+			const text = document.getElementById(button.dataset.copy).innerText.replace(/^[$>] /gm, '');
 			try {
 				await navigator.clipboard.writeText(text);
 				button.textContent = 'Copied';
@@ -26,6 +27,42 @@
 			}
 			setTimeout(() => { button.textContent = 'Copy'; }, 1600);
 		});
+	}
+
+	// Commands for the visitor's system: guessed once, then whatever they pick, remembered.
+	const guessOs = () => {
+		const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent;
+		return /win/i.test(platform) ? 'windows' : /mac|iphone|ipad/i.test(platform) ? 'mac' : 'linux';
+	};
+	let os = guessOs();
+	try { os = localStorage.getItem('ghis:os') || os; } catch { /* storage blocked */ }
+	const pickOs = (next) => {
+		os = next;
+		document.body.dataset.os = os;
+		for (const tab of document.querySelectorAll('[data-pick-os]')) tab.setAttribute('aria-selected', String(tab.dataset.pickOs === os));
+	};
+	for (const tab of document.querySelectorAll('[data-pick-os]')) {
+		tab.addEventListener('click', () => {
+			pickOs(tab.dataset.pickOs);
+			try { localStorage.setItem('ghis:os', os); } catch { /* storage blocked */ }
+		});
+	}
+	pickOs(os);
+
+	// Year-in-review season, December 1 to January 15: the banner names the year to review.
+	// ?season=2026 previews it any time.
+	const season = (() => {
+		const forced = new URLSearchParams(location.search).get('season');
+		if (forced) return forced;
+		const now = new Date();
+		if (now.getMonth() === 11) return String(now.getFullYear());
+		if (now.getMonth() === 0 && now.getDate() <= 15) return String(now.getFullYear() - 1);
+		return null;
+	})();
+	if (season) {
+		const banner = document.getElementById('season');
+		banner.querySelector('[data-season-year]').textContent = season;
+		banner.hidden = false;
 	}
 
 	// The embedded demo: one story per provider, each its own route (demo/, demo/gitlab/, ...).
