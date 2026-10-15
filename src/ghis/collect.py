@@ -12,7 +12,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from .api import ApiError
 from .common import SCHEMA_VERSION, die, host_allowed, log, same_host
@@ -213,7 +213,7 @@ def _collect(args: argparse.Namespace, provider: str, token: str | None) -> dict
     local_keys = {k for k, _ in targets}
     skipped: list[dict[str, str]] = []
 
-    cloned = 0
+    to_clone: list[tuple[str, dict[str, Any]]] = []
     if not args.no_clone:
         to_clone = [
             (k, p)
@@ -235,67 +235,78 @@ def _collect(args: argparse.Namespace, provider: str, token: str | None) -> dict
                     f"may not contact: {', '.join(refused[:5])}"
                 )
             to_clone = [(k, p) for k, p in to_clone if p["path"] not in refused]
+
+    ignore = () if args.count_all_files else DEFAULT_IGNORE
+    author_emails = sorted(emails)
+    env = clone_env(token, api["cloneUser"] or "git", restricted)
+    Found = tuple[list[dict[str, Any]], Optional[str]]
+
+    def scan(path: str, fetch_env: dict[str, str] | None) -> Found:
+        try:
+            return scan_repo(path, author_emails, ignore, fetch_env), None
+        except GitError as err:
+            return [], str(err)
+
+    def sync(project: dict[str, Any]) -> tuple[str | None, str]:
+        try:
+            path, how = sync_clone(project, cache, args.clone_via, env, author_emails)
+            return str(path), how
+        except GitError as err:
+            return None, str(err)
+
+    # Each repository is read as soon as it is on disk, while the others still download.
+    # Downloads mostly wait on the network, so twice as many run at once as reads.
+    reads: dict[str, concurrent.futures.Future[Found]] = {}
+    clones: dict[str, str] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as readers:
+        for key, path in targets:  # local checkouts: nothing to download
+            reads[key] = readers.submit(scan, path, None)
         if to_clone:
             cache = Path(args.cache).expanduser().resolve()
             cache.mkdir(parents=True, exist_ok=True)
-            env = clone_env(token, api["cloneUser"] or "git", restricted)
             log(
-                f"Downloading {len(to_clone)} repositories: their history, then only the files "
-                "your commits changed..."
+                f"Downloading {len(to_clone)} repositories: only what your commits need, "
+                "read as each one arrives..."
             )
-            mine = sorted(emails)
-
-            def sync(item: tuple[str, dict[str, Any]]) -> tuple[str, str | None, str | None]:
-                key, project = item
-                try:
-                    path = sync_clone(project, cache, args.clone_via, env, mine)
-                    return key, str(path), None
-                except GitError as err:
-                    return key, None, str(err)
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-                for done, (key, path, error) in enumerate(pool.map(sync, to_clone), 1):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs * 2) as downloads:
+                started = {downloads.submit(sync, p): k for k, p in to_clone}
+                for done, future in enumerate(concurrent.futures.as_completed(started), 1):
+                    key = started[future]
                     name = projects[key]["path"]
+                    path, how = future.result()
                     if path:
-                        targets.append((key, path))
-                        cloned += 1
-                        log(f"  [{done}/{len(to_clone)}] {name}")
+                        clones[key] = path
+                        # The token too: anything still missing is fetched while reading.
+                        reads[key] = readers.submit(scan, path, env)
+                        log(f"  [{done}/{len(to_clone)}] {name} ({how})")
                     else:
-                        warnings.append(f"Could not clone {name}: {error}")
-                        skipped.append({"path": name, "reason": f"could not be cloned: {error}"})
-                        log(f"  [{done}/{len(to_clone)}] {name} FAILED: {error}")
+                        warnings.append(f"Could not clone {name}: {how}")
+                        skipped.append({"path": name, "reason": f"could not be cloned: {how}"})
+                        log(f"  [{done}/{len(to_clone)}] {name} FAILED: {how}")
+        log(f"Reading commits from {len(reads)} repositories...")
+    cloned = len(clones)
+    # Local checkouts first, then clones in the order the host listed them: the same order
+    # every run, so a change found in two repositories is always credited to the same one.
+    targets += [(k, clones[k]) for k, _ in to_clone if k in clones]
 
-    log(f"Reading commits from {len(targets)} repositories...")
-    ignore = () if args.count_all_files else DEFAULT_IGNORE
-    author_emails = sorted(emails)
     # One change can carry several ids: a fork shares it, but a rebase or a cherry-pick copies
     # it under a new one. Copies keep the author, the author time and the message, so those
     # identify a change alongside its id.
     seen: set[str] = set()
     per_project: dict[str, list[dict[str, Any]]] = {}
-
-    def scan(item: tuple[str, str]) -> tuple[str, list[dict[str, Any]], str | None]:
-        key, path = item
-        try:
-            return key, scan_repo(path, author_emails, ignore), None
-        except GitError as err:
-            return key, [], str(err)
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        for key, found, error in pool.map(scan, targets):
-            if error:
-                warnings.append(f"Could not read {projects[key]['path']}: {error}")
-                skipped.append(
-                    {"path": projects[key]["path"], "reason": f"could not be read: {error}"}
-                )
-                continue
-            unique = []
-            for c in found:
-                keys = (c["h"], f"{c['t']}\x1f{c['e']}\x1f{c['s']}")
-                if not any(k in seen for k in keys):
-                    seen.update(keys)
-                    unique.append(c)
-            per_project.setdefault(key, []).extend(unique)
+    for key, _ in targets:
+        found, error = reads[key].result()
+        if error:
+            warnings.append(f"Could not read {projects[key]['path']}: {error}")
+            skipped.append({"path": projects[key]["path"], "reason": f"could not be read: {error}"})
+            continue
+        unique = []
+        for c in found:
+            keys = (c["h"], f"{c['t']}\x1f{c['e']}\x1f{c['s']}")
+            if not any(k in seen for k in keys):
+                seen.update(keys)
+                unique.append(c)
+        per_project.setdefault(key, []).extend(unique)
 
     request_paths = {r["project"].lower() for r in api["requests"] + api["reviews"]}
     kept = [k for k in projects if per_project.get(k) or k in request_paths]

@@ -274,32 +274,82 @@ class CollectTests(Isolated):
         everything = git.scan_repo(str(self.repo), ["me@example.com"], ())
         self.assertEqual(min(everything, key=lambda c: c["t"])["a"], 510)
 
-    def test_blobless_clone_downloads_only_your_files(self) -> None:
-        source = make_repo(self.root / "served", "app")
-        for key in ("uploadpack.allowFilter", "uploadpack.allowAnySHA1InWant"):
-            subprocess.run(["git", "-C", str(source), "config", key, "true"], check=True)
-        project = {"path": "team/app", "cloneUrl": source.as_uri()}
-        clone = git.sync_clone(project, self.root / "blobless", "https", None, ["me@example.com"])
-        self.assertTrue(git.is_partial(clone))
-        # Your files arrived in the one request and someone else's never did. Checked before
-        # reading, since a read would fetch a missing file by itself; --missing=print lists
-        # what is absent without fetching it.
-        blob = lambda spec: git.git(["-C", str(source), "rev-parse", spec]).strip()  # noqa: E731
+    def serve(self, name: str, others: int = 0, **settings: str) -> Path:
+        """make_repo's repository, plus `others` commits by someone else, offered over
+        file:// with partial clone allowed (and any upload-pack `settings`)."""
+        source = make_repo(self.root / name, "app")
+        run = lambda *a: subprocess.run(["git", "-C", str(source), *a], check=True)  # noqa: E731
+        for i in range(others):
+            (source / f"theirs_{i}.js").write_text(f"{i}\n", encoding="utf-8")
+            run("add", "-A")
+            run(
+                "-c",
+                "user.name=Them",
+                "-c",
+                "user.email=them@example.com",
+                "commit",
+                "-qm",
+                f"T{i}",
+            )
+        settings = {
+            "uploadpack.allowFilter": "true",
+            "uploadpack.allowAnySHA1InWant": "true",
+            **settings,
+        }
+        for key, value in settings.items():
+            run("config", key, value)
+        return source
+
+    def missing(self, clone: Path) -> set[str]:
+        """Objects the clone does not have. --missing=print lists them without fetching,
+        which any other read of a missing object would do by itself."""
         listing = ["-C", str(clone), "rev-list", "--objects", "--all", "--missing=print"]
-        missing = {line[1:] for line in git.git(listing).split() if line.startswith("?")}
-        self.assertIn(blob("HEAD~2:other.js"), missing)  # their commit
-        self.assertNotIn(blob("HEAD~4:app.py"), missing)  # your first commit
-        self.assertNotIn(blob("HEAD~3:src/main.py"), missing)  # your rename
-        # And reading the clone gives exactly what reading the original does.
+        return {line[1:] for line in git.git(listing).split() if line.startswith("?")}
+
+    def test_commits_only_clone_downloads_only_what_your_commits_need(self) -> None:
+        # Your 4 commits among 85: their snapshots are a small share, so commits only it is.
+        source = self.serve("served-long", others=80)
+        project = {"path": "team/long", "cloneUrl": source.as_uri()}
+        clone, how = git.sync_clone(project, self.root / "c1", "https", None, ["me@example.com"])
+        self.assertEqual(how, "commits only")
+        obj = lambda spec: git.git(["-C", str(source), "rev-parse", spec]).strip()  # noqa: E731
+        missing = self.missing(clone)  # checked before reading, which would fill gaps itself
+        self.assertNotIn(obj("HEAD~84:app.py"), missing)  # your first commit's file
+        self.assertNotIn(obj("HEAD~83:src/main.py"), missing)  # your rename
+        self.assertNotIn(obj("HEAD~83^{tree}"), missing)  # the snapshot your commit made
+        self.assertIn(obj("HEAD~5:theirs_74.js"), missing)  # their file
+        self.assertIn(obj("HEAD~5^{tree}"), missing)  # and the snapshot of their commit
+        scan = lambda repo: git.scan_repo(str(repo), ["me@example.com"], ())  # noqa: E731
+        self.assertEqual(scan(clone), scan(source))  # exactly what the original gives
+
+    def test_mostly_your_history_downloads_all_folder_listings(self) -> None:
+        # 4 of 5 commits are yours (or name you): every snapshot is needed anyway.
+        source = self.serve("served-mine")
+        project = {"path": "team/mine", "cloneUrl": source.as_uri()}
+        clone, how = git.sync_clone(project, self.root / "c2", "https", None, ["me@example.com"])
+        self.assertEqual(how, "history")
+        obj = lambda spec: git.git(["-C", str(source), "rev-parse", spec]).strip()  # noqa: E731
+        missing = self.missing(clone)
+        self.assertIn(obj("HEAD~2:other.js"), missing)  # their file still stays on the host
+        self.assertNotIn(obj("HEAD~4:app.py"), missing)
         scan = lambda repo: git.scan_repo(str(repo), ["me@example.com"], ())  # noqa: E731
         self.assertEqual(scan(clone), scan(source))
 
+    def test_host_refusing_commits_only_falls_back_to_history(self) -> None:
+        source = self.serve("served-notree", others=30, **{"uploadpackfilter.tree.allow": "false"})
+        project = {"path": "team/notree", "cloneUrl": source.as_uri()}
+        clone, how = git.sync_clone(project, self.root / "c3", "https", None, ["me@example.com"])
+        self.assertEqual(how, "history")
+        self.assertEqual(len(git.scan_repo(str(clone), ["me@example.com"], ())), 3)
+
     def test_host_that_cannot_send_single_files_gets_a_full_clone(self) -> None:
-        source = make_repo(self.root / "served-old", "app")
-        subprocess.run(["git", "-C", str(source), "config", "uploadpack.allowFilter", "true"])
+        source = self.serve("served-old", others=30)
         project = {"path": "team/old", "cloneUrl": source.as_uri()}
         with mock.patch.object(git, "fetch_your_files", side_effect=git.GitError("refused")):
-            clone = git.sync_clone(project, self.root / "full", "https", None, ["me@example.com"])
+            clone, how = git.sync_clone(
+                project, self.root / "c4", "https", None, ["me@example.com"]
+            )
+        self.assertEqual(how, "full clone")
         self.assertFalse(git.is_partial(clone))
         self.assertEqual(len(git.scan_repo(str(clone), ["me@example.com"], ())), 3)
 

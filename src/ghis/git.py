@@ -255,15 +255,33 @@ def remove_tree(path: Path) -> None:
         shutil.rmtree(path, onerror=retry)
 
 
-def sync_clone(
-    project: dict[str, Any], cache: Path, via: str, env: dict[str, str], emails: list[str]
-) -> Path:
-    """A bare copy of a repository holding everything needed to read your commits.
+# Up to this share of a repository's history being yours (with the commit before each of
+# yours), fetching only the snapshots your commits need beats downloading every folder
+# listing at once. Each targeted request costs the host time to assemble, so it has to save
+# a lot: measured on Django, 5% of the history halved the download (37 MB instead of 75)
+# for some 10 s of extra server time, a win below ~5 MB/s. Above it, one bulk download wins.
+TARGETED_SHARE = 0.10
 
-    Only history is downloaded at first (commits and folder listings, a "blobless" clone),
-    then, in one request, the file versions your own commits changed: numstat compares
-    exactly those. A large repository costs a fraction of a full clone, and the result is
-    identical. A host that can't serve that (an old server) gets a full clone instead."""
+
+def sync_clone(
+    project: dict[str, Any],
+    cache: Path,
+    via: str,
+    env: dict[str, str] | None,
+    emails: list[str],
+) -> tuple[Path, str]:
+    """A bare copy of a repository holding everything needed to read your commits, and how
+    it was made, for the progress line.
+
+    The cheapest way that works, tried in order:
+    1. "commits only" (--filter=tree:0): the history without folder listings or files, a few
+       percent of a full clone; then, in one request each, the folder listings of the
+       snapshots your commits compare, and the file versions they changed. Best when your
+       commits are a small part of a long history.
+    2. "history" (--filter=blob:none): every commit and folder listing, then only your files.
+       Chosen when a large share of the history is yours.
+    3. a full clone, for a host that can't serve either.
+    numstat reads exactly the same data either way, so the numbers do not change."""
     dest = cache / (re.sub(r"[^\w.-]+", "__", project["path"]) + ".git")
     url = clone_url(project, via)
     if not url:
@@ -280,7 +298,7 @@ def sync_clone(
                 "--quiet",
                 "--prune",
                 "--force",
-                # The promisor remote by name, so the fetch stays blobless.
+                # The promisor remote by name, so the fetch keeps the clone's filter.
                 "origin" if partial else url,
                 "+refs/heads/*:refs/heads/*",
                 "+refs/tags/*:refs/tags/*",
@@ -289,42 +307,95 @@ def sync_clone(
         )
         if partial:
             fetch_your_files(dest, emails, env)
-        return dest
+        return dest, "updated"
     building = dest.with_suffix(".partial")
+    failure: GitError | None = None
+    for strategy in ("tree:0", "blob:none", ""):
+        if building.exists():
+            remove_tree(building)
+        try:
+            flags = [f"--filter={strategy}"] if strategy else []
+            git(["clone", "--bare", "--quiet", *flags, url, str(building)], env=env)
+            if not strategy or not is_partial(building):
+                how = "full clone"  # asked for one, or the host ignored the filter
+            elif strategy == "tree:0" and share_needed(building, emails) > TARGETED_SHARE:
+                continue  # mostly your history: all folder listings at once is cheaper
+            else:
+                fetch_your_files(building, emails, env)
+                how = "commits only" if strategy == "tree:0" else "history"
+            building.rename(dest)
+            return dest, how
+        except GitError as err:
+            failure = err  # e.g. a host that refuses this filter: try the next way
     if building.exists():
         remove_tree(building)
-    git(["clone", "--bare", "--quiet", "--filter=blob:none", url, str(building)], env=env)
-    if is_partial(building):  # a server without partial clone sends everything instead
-        try:
-            fetch_your_files(building, emails, env)
-        except GitError as err:
-            log(f"  {project['path']}: this host can't send single files ({err}); full clone")
-            remove_tree(building)
-            git(["clone", "--bare", "--quiet", url, str(building)], env=env)
-    building.rename(dest)
-    return dest
+    raise failure or GitError("could not clone")
 
 
 def is_partial(repo: Path) -> bool:
-    """Whether a clone left files on the server to fetch later. Recent git marks the remote
-    (remote.origin.promisor); older versions set extensions.partialClone."""
+    """Whether a clone left objects on the server to fetch later. Recent git marks the
+    remote (remote.origin.promisor); older versions set extensions.partialClone."""
     for key in ("remote.origin.promisor", "extensions.partialClone"):
-        try:
-            value = git(["-C", str(repo), "config", "--get", key]).strip().lower()
-        except GitError:
-            continue  # not set
+        value = config_value(repo, key).lower()
         if value and value != "false":
             return True
     return False
 
 
-# The files fetched so far into a kept clone, so the next run asks only for new ones.
+def config_value(repo: Path, key: str) -> str:
+    try:
+        return git(["-C", str(repo), "config", "--get", key]).strip()
+    except GitError:
+        return ""  # not set
+
+
+def your_commits(repo: Path, emails: list[str]) -> dict[str, list[str]]:
+    """Your commits (authored, or naming you in the message) mapped to their parents.
+    Needs commits only, so it works on a commits-only clone."""
+    found: dict[str, list[str]] = {}
+    for filters in mine_filters(emails):
+        for line in _git_log(str(repo), ["--format=%H %P"], filters).splitlines():
+            commit, *parents = line.split()
+            found[commit] = parents
+    return found
+
+
+def share_needed(repo: Path, emails: list[str]) -> float:
+    """The share of all commits whose snapshots reading your commits needs: yours, and
+    the ones just before each of them."""
+    total = int(git(["-C", str(repo), "rev-list", "--all", "--count"]).strip() or 0)
+    mine = your_commits(repo, emails)
+    needed = set(mine) | {p for parents in mine.values() for p in parents}
+    return len(needed) / total if total else 0.0
+
+
+# The objects fetched so far into a kept clone, so the next run asks only for new ones.
 FETCHED_LIST = "ghis-fetched-files"
 
 
-def fetch_your_files(repo: Path, emails: list[str], env: dict[str, str]) -> None:
-    """Download, in one request, every file version that your commits changed: the ones
-    scan_repo will compare. --raw lists them from folder listings alone, without the files."""
+def fetch_your_files(repo: Path, emails: list[str], env: dict[str, str] | None) -> None:
+    """Download what reading your commits needs and the clone left out. For a commits-only
+    clone, first the folder listings of the snapshots your commits compare (yours and the
+    ones before them); then, for both kinds, the file versions your commits changed, which
+    --raw lists from folder listings alone."""
+    record = repo / FETCHED_LIST
+    fetched = set(record.read_text(encoding="ascii").split()) if record.is_file() else set()
+    if config_value(repo, "remote.origin.partialclonefilter") == "tree:0":
+        mine = your_commits(repo, emails)
+        commits = set(mine) | {p for parents in mine.values() for p in parents}
+        roots = (
+            set(
+                git(
+                    ["-C", str(repo), "log", "--no-walk=unsorted", "--format=%T", "--stdin"],
+                    stdin="\n".join(sorted(commits)) + "\n",
+                ).split()
+            )
+            if commits
+            else set()
+        )
+        # Each root brings its whole folder listing (--filter=blob:none: no files).
+        fetch_objects(repo, roots - fetched, env)
+        fetched |= roots
     wanted: set[str] = set()
     for filters in mine_filters(emails):
         out = _git_log(str(repo), ["--no-renames", "--raw", "--no-abbrev", "--format="], filters)
@@ -338,28 +409,31 @@ def fetch_your_files(repo: Path, emails: list[str], env: dict[str, str]) -> None
             if new_mode != "160000":
                 wanted.add(new)
     wanted -= {"0" * 40, "0" * 64}  # the "no file" side of an addition or a deletion
-    record = repo / FETCHED_LIST
-    fetched = set(record.read_text(encoding="ascii").split()) if record.is_file() else set()
-    missing = sorted(wanted - fetched)
-    if missing:
-        git(
-            [
-                "-C",
-                str(repo),
-                "-c",
-                "fetch.negotiationAlgorithm=noop",  # ask for exactly these, nothing else
-                "fetch",
-                "origin",
-                "--no-tags",
-                "--no-write-fetch-head",
-                "--recurse-submodules=no",
-                "--filter=blob:none",
-                "--stdin",
-            ],
-            env=env,
-            stdin="\n".join(missing) + "\n",
-        )
+    fetch_objects(repo, wanted - fetched, env)
     record.write_text("\n".join(sorted(fetched | wanted)) + "\n", encoding="ascii")
+
+
+def fetch_objects(repo: Path, ids: set[str], env: dict[str, str] | None) -> None:
+    """Fetch exactly these objects from the clone's remote, in one request."""
+    if not ids:
+        return
+    git(
+        [
+            "-C",
+            str(repo),
+            "-c",
+            "fetch.negotiationAlgorithm=noop",  # ask for exactly these, nothing else
+            "fetch",
+            "origin",
+            "--no-tags",
+            "--no-write-fetch-head",
+            "--recurse-submodules=no",
+            "--filter=blob:none",
+            "--stdin",
+        ],
+        env=env,
+        stdin="\n".join(sorted(ids)) + "\n",
+    )
 
 
 def clone_url(project: dict[str, Any], via: str) -> str | None:
@@ -388,7 +462,9 @@ def language_of(path: str) -> str:
     return LANGUAGES.get(os.path.splitext(name)[1], "Other")
 
 
-def _git_log(repo: str, output: list[str], filters: list[str]) -> str:
+def _git_log(
+    repo: str, output: list[str], filters: list[str], env: dict[str, str] | None = None
+) -> str:
     return git(
         [
             "-C",
@@ -403,12 +479,13 @@ def _git_log(repo: str, output: list[str], filters: list[str]) -> str:
             "--fixed-strings",
             "--regexp-ignore-case",
             *filters,
-        ]
+        ],
+        env=env,
     )
 
 
-def _log(repo: str, fmt: str, filters: list[str]) -> str:
-    return _git_log(repo, ["--numstat", f"--format={fmt}"], filters)
+def _log(repo: str, fmt: str, filters: list[str], env: dict[str, str] | None = None) -> str:
+    return _git_log(repo, ["--numstat", f"--format={fmt}"], filters, env)
 
 
 def mine_filters(emails: list[str]) -> tuple[list[str], list[str]]:
@@ -461,14 +538,16 @@ def _parse(out: str, ignore: tuple[str, ...], trailers: bool) -> list[dict[str, 
     return commits
 
 
-def scan_repo(repo: str, emails: list[str], ignore: tuple[str, ...]) -> list[dict[str, Any]]:
+def scan_repo(
+    repo: str, emails: list[str], ignore: tuple[str, ...], env: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
     """Your commits in one repository: the ones you authored, plus the ones that credit you
     in a Co-authored-by trailer (pair programming, suggested changes), marked "co"."""
     by_author, by_message = mine_filters(emails)
-    authored = _parse(_log(repo, LOG_FORMAT, by_author), ignore, False)
+    authored = _parse(_log(repo, LOG_FORMAT, by_author, env), ignore, False)
     # --grep finds the email anywhere in the message; the trailer check below keeps only real
     # co-authorship, and commits you also authored are already in the first list.
-    mentioned = _parse(_log(repo, CO_FORMAT, by_message), ignore, True)
+    mentioned = _parse(_log(repo, CO_FORMAT, by_message, env), ignore, True)
     mine = set(emails)
     co_authored = []
     for commit in mentioned:

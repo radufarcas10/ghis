@@ -112,9 +112,12 @@ How it counts:
   current it is, the emails matched, and anything left out.
 - **Times** are shown in the timezone you committed from. Review and comment activity is moved
   into that same timezone, so it lands on the right day.
-- **Only what it needs is downloaded.** A repository's history comes first, without its
-  files. Then, in one request, only the file versions your own commits changed are fetched.
-  On a large repository that is a fraction of a full clone, and the numbers are identical.
+- **Only what it needs is downloaded.** ghis never downloads anyone else's files. Where
+  your commits are a small part of a long history, it downloads the bare list of commits
+  and then only the snapshots and files your commits touched. Otherwise it downloads the
+  history without files, then your files. A host that supports neither gets a full clone.
+  The numbers are identical every way. Repositories are read as each one arrives, while
+  the rest download.
 - **Nothing is left behind.** Downloads go to a temporary folder that is deleted when the
   story is built, even if it fails or you stop it. The story itself is saved to `out/`.
   To make later stories faster, tick **Keep downloaded repositories** in the app (or pass
