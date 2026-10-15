@@ -149,34 +149,110 @@ page after changing it, without collecting again.
 
 ## Hosting ghis for others
 
+Run ghis as a web app that colleagues or the public open in their browser:
+
 ```bash
-docker compose up --build      # http://localhost:8080
+docker run -p 8080:8080 ghcr.io/radufarcas10/ghis:latest     # http://localhost:8080
 ```
 
-or `docker build -t ghis . && docker run -p 8080:8080 ghis`. The image runs on any
-container host (Fly.io, Render, Railway, Cloud Run, a VPS). When ghis is reachable by others
-it switches to **hosted mode**:
+When ghis is reachable by others, it switches to **hosted mode**:
 
-- It only contacts hosts on an allowlist and only clones over HTTPS. Add your self-hosted
-  instance there.
+- It only contacts hosts on an allowlist and only clones over HTTPS.
 - Local folders and SSH are disabled.
 - Clones are deleted after each job, and stories expire.
-- Visitors can also upload a `history.json` made with the CLI. That is the way to include
+- Visitors can also upload a `history.json` made with the CLI. That is how to include
   instances the server cannot reach.
 
-| Setting | Default |
-|---|---|
-| `GHIS_ALLOWED_HOSTS` | `github.com,gitlab.com,codeberg.org,bitbucket.org,git.sr.ht` |
-| `GHIS_MAX_JOBS` | `2` collections at a time (the rest queue) |
-| `GHIS_TTL_MINUTES` | `60` minutes a story stays available |
-| `GHIS_MAX_STORIES` | `200` stories held at once |
-| `GHIS_GIT_TIMEOUT` | `600` seconds per clone or scan |
-| `PORT` | `8080` |
+The image runs on any container host (a VPS, Fly.io, Render, Railway, Cloud Run, Kubernetes)
+on amd64 and arm64. `:latest` is the newest release, `:0.1.0` pins one, and `:edge` follows
+`main`. To build it yourself instead, run `docker compose up --build` in a checkout.
 
-Before going public: serve it over **HTTPS** (people paste tokens into it), keep the
-allowlist short, give it enough temporary disk for clones, and run a single replica,
-because stories are held in memory. [SECURITY.md](SECURITY.md) describes the guarantees in
-detail.
+### Deploy for your team
+
+[`deploy/`](deploy/) runs ghis on your own domain over HTTPS, behind a login, with one
+command. It pairs ghis with [Caddy](https://caddyserver.com), which obtains and renews the
+certificate itself. On a server whose DNS name points at it, with ports 80 and 443 open:
+
+```bash
+git clone https://github.com/radufarcas10/ghis.git && cd ghis
+cp deploy/.env.example deploy/.env       # set the domain, login and your instance
+docker compose -f deploy/compose.yml up -d
+```
+
+For a company GitLab at `gitlab.example.com`, `deploy/.env` would hold:
+
+```bash
+GHIS_DOMAIN=stories.example.com
+GHIS_LOGIN=team
+GHIS_PASSWORD_HASH='$2a$14$...'           # docker run --rm caddy:2 caddy hash-password
+GHIS_ALLOWED_HOSTS=gitlab.example.com
+GHIS_DEFAULT_PROVIDER=gitlab
+GHIS_DEFAULT_URL=https://gitlab.example.com
+```
+
+Everyone then opens `https://stories.example.com`, signs in, and finds the form already
+pointed at your GitLab. They only paste their own token.
+
+### Settings
+
+Each setting is an environment variable, or the `ghis serve` flag in brackets.
+
+| Setting | Does | Default |
+|---|---|---|
+| `GHIS_PUBLIC_URL` (`--public-url`) | The address people open, such as `https://stories.example.com`. Set it whenever ghis is behind a proxy. | none |
+| `GHIS_ALLOWED_HOSTS` | Hosts the server may call. Add your self-hosted instance, or use `*` on a private network. | `github.com,gitlab.com,codeberg.org,bitbucket.org,git.sr.ht` |
+| `GHIS_DEFAULT_PROVIDER` | The provider the form starts on: `github`, `gitlab`, `gitea` or `git`. | `github` |
+| `GHIS_DEFAULT_URL` | The instance the form starts with. Needs `GHIS_DEFAULT_PROVIDER`, and its host must be allowed. | the provider's public site |
+| `GHIS_CA_FILE` (`--ca-file`) | A PEM file of extra certificate authorities to trust, for an instance with an internal certificate. The system's own stay trusted. | none |
+| `GHIS_MAX_JOBS` | How many stories are built at once. The rest wait in line. | `2` |
+| `GHIS_TTL_MINUTES` | How long a finished story stays available. | `60` |
+| `GHIS_MAX_STORIES` | Stories held at once. New ones are refused beyond it. | `200` |
+| `GHIS_GIT_TIMEOUT` | Seconds one clone or scan may take. | `600` |
+| `PORT` | The port to listen on. | `8080` |
+
+A setting that makes no sense, such as a default instance that isn't allowed, stops ghis at
+startup with the reason rather than failing later for a visitor. `GHIS_CA_FILE` works for
+the command line too (`ghis collect --ca-file company-ca.pem`).
+
+### Behind your own proxy
+
+Already run nginx, Traefik or a load balancer? Point it at port 8080 and set
+`GHIS_PUBLIC_URL`. ghis compares it with the browser's `Origin` to block cross-site requests.
+Without it, the comparison uses the `Host` header, which many proxies rewrite. "Create my
+story" then fails with a 403.
+
+```nginx
+server {
+    server_name stories.example.com;
+    # listen 443 ssl; plus your certificate lines
+    client_max_body_size 64m;    # history.json uploads; nginx allows 1 MB by default
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_read_timeout 300s;
+    }
+}
+```
+
+To serve it under a path such as `https://example.com/ghis/`, strip the prefix in the proxy:
+with nginx, `location /ghis/ { proxy_pass http://127.0.0.1:8080/; }`, and with Caddy,
+`handle_path /ghis/* { reverse_proxy ghis:8080 }`. The pages use only relative links, so
+nothing else changes. Use the address with its trailing slash.
+
+### Who can use it
+
+ghis has no accounts of its own: anyone who can reach it can build a story, using their own
+token. Decide who that should be:
+
+- **Your team only:** the login in `deploy/Caddyfile`, a single sign-on proxy such as
+  [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/), Cloudflare Access or
+  Tailscale. Leave `/healthz` open for health checks.
+- **The public:** HTTPS (people paste tokens into it), a short allowlist, and a
+  rate-limiting proxy.
+
+Either way, give it enough temporary disk for clones (`/tmp`, 4 GB in the compose files) and
+run a **single replica**. Stories live in that process's memory, so a restart forgets them,
+which suits stories that expire anyway. [SECURITY.md](SECURITY.md) describes the guarantees
+in detail.
 
 ## Troubleshooting
 

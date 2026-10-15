@@ -28,18 +28,25 @@ jobs:
         os: [ubuntu-latest]
         python: ["3.9", "3.11", "3.13"]
         include:
-          - { os: macos-latest, python: "3.9", arch: x64 } # no native arm64 build; runs under Rosetta
+          # The Python 3.9 macOS ships (/usr/bin/python3, from the Command Line Tools): what a
+          # Mac user runs. setup-python has no arm64 3.9, and its x64 one needs Intel Homebrew.
+          - { os: macos-latest, python: system }
           - { os: macos-latest, python: "3.13" }
           - { os: windows-latest, python: "3.9" }
           - { os: windows-latest, python: "3.13" }
+    env:
+      PYTHON: ${{ matrix.python == 'system' && '/usr/bin/python3' || 'python' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
+        if: matrix.python != 'system'
         with:
           python-version: ${{ matrix.python }}
-          architecture: ${{ matrix.arch }}
+      - run: $PYTHON --version
+        shell: bash
       # Includes the headless-Chrome tests: GitHub's runners ship Chrome on all three systems.
-      - run: python -m unittest discover tests -v
+      - run: $PYTHON -m unittest discover tests -v
+        shell: bash
 
   javascript:
     runs-on: ${{ matrix.os }}

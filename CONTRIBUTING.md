@@ -17,6 +17,8 @@ Requirements: Python 3.9+ and git 2.31+. The development tools below are optiona
 ## Tests and checks
 
 CI runs all of these on every push, on Linux, macOS and Windows ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+On macOS, Python 3.9 is the one the system ships (`/usr/bin/python3`), since that is what a
+Mac user runs.
 
 | What | Command | Needs |
 |---|---|---|
@@ -62,6 +64,7 @@ src/ghis/
     connect.*               the app's landing page and progress view
     style.css, theme.js     shared styles and the theme switch
 site/                       the project website (GitHub Pages)
+deploy/                     a team deployment: compose file, Caddy config, settings template
 tests/                      Python tests; tests/js/ for JavaScript
 ```
 
@@ -127,6 +130,16 @@ found" panel never shows a real computer. Rebuild them after a visible UI change
 ```bash
 tools/screenshots.sh     # needs Chrome
 ```
+
+## Releasing
+
+1. Set the new version in `src/ghis/__init__.py`.
+2. Tag it and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
+
+[`.github/workflows/image.yml`](.github/workflows/image.yml) then publishes the Docker image
+as `ghcr.io/<owner>/ghis:0.2.0`, `:0.2` and `:latest`, for amd64 and arm64. Every push to
+`main` also publishes `:edge`. The first time, GitHub creates the package as private: make it
+public in the package's settings so `docker run` works without logging in.
 
 ## Adding a provider
 

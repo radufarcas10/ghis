@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import ssl
 import sys
+import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -89,3 +91,47 @@ def tilde(path: Path) -> str:
         return "~/" + path.relative_to(Path.home()).as_posix()  # one separator on every OS
     except ValueError:
         return str(path)
+
+
+# Where Linux distributions keep the system's certificate authorities, for when Python
+# doesn't say (Debian and Ubuntu, Fedora and RHEL, Alpine and macOS, openSUSE).
+SYSTEM_BUNDLES = (
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/ssl/cert.pem",
+    "/etc/ssl/ca-bundle.pem",
+)
+
+
+# Extra certificate authorities to trust, set by trust_ca_file; api.Http adds them to the
+# system's own for every API call.
+EXTRA_CA: Path | None = None
+
+
+def trust_ca_file(path: str) -> Path:
+    """Also trust the certificate authorities in `path`, such as a company's internal CA that
+    signed its GitLab's certificate, for API calls and git alike. API calls add the file to
+    the system's certificates (EXTRA_CA). git takes a single bundle that replaces its own, so
+    the bundle written here is the system's certificates followed by the extra ones, and
+    GIT_SSL_CAINFO points at it."""
+    global EXTRA_CA
+    extra = Path(path).expanduser()
+    try:
+        pem = extra.read_text(encoding="ascii")
+    except (OSError, UnicodeDecodeError) as err:
+        raise CollectError(f"Cannot read the CA certificate file {extra}: {err}") from None
+    if "-----BEGIN CERTIFICATE-----" not in pem:
+        raise CollectError(f"{extra} holds no PEM certificate (-----BEGIN CERTIFICATE-----)")
+    defaults = ssl.get_default_verify_paths()
+    candidates = (os.environ.get("SSL_CERT_FILE"), defaults.cafile, defaults.openssl_cafile)
+    system = next(
+        (Path(c) for c in (*candidates, *SYSTEM_BUNDLES) if c and Path(c).is_file()), None
+    )
+    bundle = Path(tempfile.gettempdir()) / f"ghis-ca-{os.getpid()}.pem"
+    trusted = system.read_text(encoding="utf-8", errors="ignore") if system else ""
+    bundle.write_text(f"{trusted.rstrip()}\n{pem.strip()}\n".lstrip(), encoding="utf-8")
+    os.environ["GIT_SSL_CAINFO"] = str(bundle)
+    EXTRA_CA = extra
+    if system is None:
+        log(f"No system certificate bundle found: git trusts only {extra} now.")
+    return bundle

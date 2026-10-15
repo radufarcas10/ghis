@@ -25,13 +25,22 @@ from pathlib import Path
 
 from . import __version__
 from .collect import collect, pick_provider, read_token
-from .common import DATA_DIR, CollectError, die, log
+from .common import DATA_DIR, CollectError, die, log, trust_ca_file
 from .demo import make_demo
 from .detect import find_token
 from .providers import COLLECTORS, PROVIDERS
 from .server import DEFAULT_ALLOWED_HOSTS
 from .server import serve as run_server
 from .site import write_site
+
+
+def ca_file(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--ca-file",
+        default=os.environ.get("GHIS_CA_FILE") or None,
+        help="PEM file of extra certificate authorities to trust, such as your company's "
+        "internal CA (env GHIS_CA_FILE)",
+    )
 
 
 def cmd_collect(args: argparse.Namespace) -> None:
@@ -142,6 +151,7 @@ def main() -> None:
     )
     collect.add_argument("--jobs", type=int, default=4, help="parallel git processes")
     collect.add_argument("--insecure", action="store_true", help="skip TLS verification")
+    ca_file(collect)
     collect.set_defaults(func=cmd_collect)
 
     render = sub.add_parser("render", help="re-render from an existing history.json")
@@ -199,7 +209,26 @@ def main() -> None:
         default=int(os.environ.get("GHIS_GIT_TIMEOUT", "600")),
         help="seconds one clone or log may take when hosted",
     )
+    serve.add_argument(
+        "--public-url",
+        default=os.environ.get("GHIS_PUBLIC_URL"),
+        help="the address people open, e.g. https://stories.example.com (env GHIS_PUBLIC_URL); "
+        "needed behind a proxy that rewrites the Host header",
+    )
+    serve.add_argument(
+        "--default-provider",
+        choices=list(PROVIDERS),
+        default=os.environ.get("GHIS_DEFAULT_PROVIDER") or None,
+        help="provider the form starts on (env GHIS_DEFAULT_PROVIDER)",
+    )
+    serve.add_argument(
+        "--default-url",
+        default=os.environ.get("GHIS_DEFAULT_URL") or None,
+        help="instance the form starts with, e.g. https://gitlab.example.com "
+        "(env GHIS_DEFAULT_URL; needs --default-provider)",
+    )
     serve.add_argument("--jobs", type=int, default=4, help="parallel git processes per job")
+    ca_file(serve)
     serve.add_argument("--workdir", help="where temporary clones go (default: system temp)")
     serve.set_defaults(func=run_server)
 
@@ -208,6 +237,8 @@ def main() -> None:
         # Plain `python3 ghis.py`: the friendly way in, the app on this computer.
         args = parser.parse_args(["serve", "--open"])
     try:
+        if getattr(args, "ca_file", None):
+            trust_ca_file(args.ca_file)
         args.func(args)
     except CollectError as err:
         log(str(err))

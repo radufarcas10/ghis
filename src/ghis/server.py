@@ -122,6 +122,14 @@ def list_field(payload: dict[str, Any], key: str, limit: int, item_limit: int) -
     return items
 
 
+def public_origin(url: str) -> str:
+    """scheme://host[:port] of a URL, lowercased: what a browser sends as Origin."""
+    parsed = urllib.parse.urlparse(url.strip())
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        die(f"The public URL must look like https://stories.example.com ({url!r})")
+    return f"{parsed.scheme}://{parsed.netloc}".lower()
+
+
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 PRETTY_HOST = "ghis.localhost"
 
@@ -137,6 +145,8 @@ class GhisServer:
         if not raw:
             raw = "*" if self.personal else DEFAULT_ALLOWED_HOSTS
         self.allowed = {h.strip().lower() for h in raw.split(",") if h.strip()}
+        self.public_origin = public_origin(args.public_url) if args.public_url else None
+        self.defaults = self.check_defaults(args.default_provider, args.default_url)
         self.jobs: dict[str, Job] = {}
         self.jobs_lock = threading.Lock()
         self.slots = threading.Semaphore(args.max_jobs)
@@ -147,6 +157,21 @@ class GhisServer:
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.identity_cache: tuple[float, dict[str, Any]] | None = None
         threading.Thread(target=self.reap, daemon=True).start()
+
+    def check_defaults(self, provider: str | None, url: str | None) -> dict[str, str]:
+        """What the form starts with: a team's own instance, so nobody has to type it."""
+        if provider and provider not in PROVIDERS:
+            die(f"Unknown default provider {provider!r}: use one of {', '.join(PROVIDERS)}")
+        if not url:
+            return {"provider": provider} if provider else {}
+        if provider not in COLLECTORS:
+            die("A default instance URL needs a default provider: github, gitlab or gitea")
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            die(f"The default instance URL must start with https:// ({url!r})")
+        if "*" not in self.allowed and not any(same_host(parsed.hostname, h) for h in self.allowed):
+            die(f"The default instance {parsed.hostname} is not in the allowed hosts; add it there")
+        return {"provider": provider, "url": url.rstrip("/")}
 
     def home_repos(self) -> list[dict[str, Any]]:
         return discover_cached([str(Path.home())], HOME_DEPTH)
@@ -194,6 +219,7 @@ class GhisServer:
             "ttlMinutes": self.ttl // 60,
             "personal": self.personal,
             "outDir": tilde(DATA_DIR / "out") if self.personal else None,
+            "defaults": self.defaults,
         }
 
     def add(self, job: Job) -> Job:
@@ -408,9 +434,13 @@ def make_handler(app: GhisServer) -> type[BaseHTTPRequestHandler]:
 
         def same_origin(self) -> bool:
             # Browsers send Origin on cross-site POSTs; a page elsewhere may not start jobs.
+            # Behind a proxy, Host is often the proxy's upstream name rather than the address
+            # people use, so a configured public URL is the thing to compare with.
             origin = self.headers.get("Origin")
             if not origin:
                 return True
+            if app.public_origin:
+                return public_origin(origin) == app.public_origin
             return (
                 urllib.parse.urlparse(origin).netloc.lower()
                 == (self.headers.get("Host") or "").lower()
@@ -525,6 +555,10 @@ def serve(args: argparse.Namespace) -> None:
         log(f"ghis is running at {url}  (also http://localhost:{port}/)")
     else:
         log(f"ghis is serving on {url}  (allowed hosts: {', '.join(sorted(app.allowed))})")
+        if args.public_url:
+            log(f"Public address: {args.public_url}")
+        else:
+            log("No GHIS_PUBLIC_URL set: behind a proxy that rewrites Host, stories won't start.")
     log("Press Ctrl+C to stop.")
     if args.open:
         threading.Timer(0.5, webbrowser.open, args=(url,)).start()

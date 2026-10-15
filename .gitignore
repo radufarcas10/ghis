@@ -11,3 +11,6 @@ dist/
 *.egg-info/
 __pycache__/
 .ruff_cache/
+# A deployment's settings and its private CA, see deploy/
+deploy/.env
+deploy/ca.pem

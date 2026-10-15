@@ -9,6 +9,11 @@ services:
       GHIS_ALLOWED_HOSTS: "github.com,gitlab.com,codeberg.org,bitbucket.org,git.sr.ht"
       GHIS_MAX_JOBS: "2"
       GHIS_TTL_MINUTES: "60"
+      # Behind a proxy on your own domain, the address people open. deploy/ does all of this.
+      # GHIS_PUBLIC_URL: "https://stories.example.com"
+      # Start the form on your own instance (its host must be allowed above).
+      # GHIS_DEFAULT_PROVIDER: "gitlab"
+      # GHIS_DEFAULT_URL: "https://gitlab.example.com"
     tmpfs:
       - /tmp:size=4g
     read_only: true

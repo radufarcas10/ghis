@@ -125,6 +125,9 @@ class BrowserTests(unittest.TestCase):
             workdir=str(self.tmp),
             max_stories=5,
             git_timeout=60,
+            public_url=None,
+            default_provider="gitlab",  # a team's server can start everyone on its host
+            default_url=None,
         )
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(server.GhisServer(args)))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -136,6 +139,7 @@ class BrowserTests(unittest.TestCase):
         for provider in ("github", "gitlab", "gitea", "git"):
             self.assertIn(f'data-provider="{provider}"', connect)
         self.assertIn("How do I get a token?", connect)
+        self.assertRegex(connect, r'data-provider="gitlab" aria-checked="true"')
 
         conn = http.client.HTTPConnection("127.0.0.1", httpd.server_address[1], timeout=10)
         body = json.dumps(demo.make_demo(5, "gitea"))

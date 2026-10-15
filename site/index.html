@@ -276,8 +276,9 @@ ghis</code></pre>
 				</article>
 				<article class="way">
 					<h3>Host it for your team</h3>
-					<p>A Docker image with an allowlist and expiring stories.</p>
-					<pre><code>docker compose up --build</code></pre>
+					<p>Your own domain, HTTPS and a login in one command, with the form already pointed at your company's instance.</p>
+					<pre><code>cp deploy/.env.example deploy/.env
+docker compose -f deploy/compose.yml up -d</code></pre>
 				</article>
 			</div>
 		</section>

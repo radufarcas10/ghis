@@ -108,7 +108,8 @@
 		$('#repos-hint').textContent = config.personal
 			? 'Optional. One clone URL per line, HTTPS or SSH, on any host. Your local repositories are always included.'
 			: 'One HTTPS clone URL per line, on any host git can clone from.';
-		$('#url').value = spec.url || '';
+		// A team's server can start everyone on its own instance (GHIS_DEFAULT_URL).
+		$('#url').value = (id === config.defaults?.provider && config.defaults.url) || spec.url || '';
 		$('#url-hint').textContent = id === 'github'
 			? 'Change it for GitHub Enterprise Server.'
 			: id === 'gitlab' ? 'Change it for a self-managed GitLab.' : 'Codeberg by default. Any Forgejo or Gitea instance works.';
@@ -383,6 +384,6 @@
 			const ttl = c.ttlMinutes ? ` Stories are kept for ${c.ttlMinutes} minutes, then forgotten.` : '';
 			$('#privacy-text').textContent += ttl;
 		}
-		selectProvider('github');
+		selectProvider(c.providers.some((p) => p.id === c.defaults?.provider) ? c.defaults.provider : 'github');
 	}).catch(() => showError('Could not reach the ghis server.'));
 })();

@@ -10,6 +10,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from . import common
+
 
 class ApiError(Exception):
     def __init__(self, message: str, status: int | None = None) -> None:
@@ -36,7 +38,12 @@ class Http:
         self.base = base.rstrip("/")
         self.headers = headers
         self.timeout = timeout
-        context = ssl._create_unverified_context() if insecure else None
+        if insecure:
+            context = ssl._create_unverified_context()
+        else:
+            context = ssl.create_default_context()
+            if common.EXTRA_CA:
+                context.load_verify_locations(cafile=str(common.EXTRA_CA))
         self.opener = urllib.request.build_opener(
             SameHostRedirect, urllib.request.HTTPSHandler(context=context)
         )

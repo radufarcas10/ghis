@@ -1,0 +1,21 @@
+# Used by deploy/compose.yml. Caddy serves {$GHIS_DOMAIN} over HTTPS with a certificate it
+# obtains and renews itself, and passes every request to ghis.
+{$GHIS_DOMAIN} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+
+	# A login in front of everything except the health check. Remove this block to let
+	# anyone who can reach the address use it. Set GHIS_LOGIN and GHIS_PASSWORD_HASH in
+	# deploy/.env; make the hash with: docker run --rm caddy:2 caddy hash-password
+	@private not path /healthz
+	basic_auth @private {
+		{$GHIS_LOGIN} {$GHIS_PASSWORD_HASH}
+	}
+
+	reverse_proxy ghis:8080 {
+		# Collecting a large history can take a while before the next progress line.
+		transport http {
+			read_timeout 5m
+		}
+	}
+}

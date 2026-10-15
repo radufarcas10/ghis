@@ -25,7 +25,13 @@ server). You should get a reply within a week.
 - A story is readable by anyone who has its link. Links are 144-bit random, and job ids
   are redacted from access logs.
 - Rejects cross-site POSTs (an `Origin` check plus a JSON-only body) and serves every page
-  with a strict Content-Security-Policy.
+  with a strict Content-Security-Policy. With `GHIS_PUBLIC_URL` set, `Origin` must match its
+  scheme and host exactly; otherwise it must match the `Host` header.
+- Has no accounts or login of its own: anyone who can reach it can build a story with their
+  own token. Restrict access in front of it (`deploy/` ships a login; see the README's
+  "Who can use it").
+- `GHIS_CA_FILE` adds certificate authorities to the system's; it never turns verification
+  off. Hosted mode has no equivalent of the CLI's `--insecure`.
 - Limits each git command to `GHIS_GIT_TIMEOUT` seconds. Disk use is bounded by the
   temporary volume you give it.
 

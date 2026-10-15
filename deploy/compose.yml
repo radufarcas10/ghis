@@ -1,0 +1,49 @@
+# ghis for a team, on your own domain, over HTTPS: ghis behind Caddy, which gets and renews
+# the certificate by itself. On a server whose DNS name points at it, with ports 80 and 443 open:
+#
+#   cp deploy/.env.example deploy/.env      # then edit deploy/.env
+#   docker compose -f deploy/compose.yml up -d
+#
+# Settings are read from deploy/.env; the README's "Deploy for your team" explains each one.
+services:
+  ghis:
+    image: ${GHIS_IMAGE:-ghcr.io/radufarcas10/ghis:latest}
+    environment:
+      GHIS_PUBLIC_URL: https://${GHIS_DOMAIN:?set GHIS_DOMAIN in deploy/.env}
+      GHIS_ALLOWED_HOSTS: ${GHIS_ALLOWED_HOSTS:-github.com,gitlab.com,codeberg.org,bitbucket.org,git.sr.ht}
+      GHIS_DEFAULT_PROVIDER: ${GHIS_DEFAULT_PROVIDER:-}
+      GHIS_DEFAULT_URL: ${GHIS_DEFAULT_URL:-}
+      GHIS_MAX_JOBS: ${GHIS_MAX_JOBS:-2}
+      GHIS_TTL_MINUTES: ${GHIS_TTL_MINUTES:-60}
+      GHIS_MAX_STORIES: ${GHIS_MAX_STORIES:-200}
+      GHIS_GIT_TIMEOUT: ${GHIS_GIT_TIMEOUT:-600}
+      # An internal certificate authority (a company GitLab): put it next to this file as
+      # ca.pem, then uncomment these two lines and the volume below.
+      # GHIS_CA_FILE: /etc/ghis/ca.pem
+    # volumes:
+    #   - ./ca.pem:/etc/ghis/ca.pem:ro
+    tmpfs:
+      - /tmp:size=4g # clones live here while a story is built
+    read_only: true
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    depends_on: [ghis]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      GHIS_DOMAIN: ${GHIS_DOMAIN}
+      GHIS_LOGIN: ${GHIS_LOGIN:-}
+      GHIS_PASSWORD_HASH: ${GHIS_PASSWORD_HASH:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:

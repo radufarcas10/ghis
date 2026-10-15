@@ -15,6 +15,7 @@ import time
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from ghis import assets, common, demo, detect, git, server, site  # noqa: E402
@@ -387,9 +388,10 @@ class CollectTests(Isolated):
 class ServerTests(Isolated):
     """Runs a real server on a free port, once hosted and once personal."""
 
-    def start(self, host_mode: str) -> tuple[ThreadingHTTPServer, int]:
-        args = argparse.Namespace(
-            host=host_mode,
+    def server_args(self, host: str, **settings: object) -> argparse.Namespace:
+        """`ghis serve`'s options with test-sized limits; keyword arguments override them."""
+        base = dict(
+            host=host,
             port=0,
             allowed_hosts=None,
             max_jobs=1,
@@ -398,8 +400,15 @@ class ServerTests(Isolated):
             workdir=str(self.root),
             max_stories=3,
             git_timeout=60,
+            public_url=None,
+            default_provider=None,
+            default_url=None,
         )
-        app = server.GhisServer(args)
+        base.update(settings)
+        return argparse.Namespace(**base)
+
+    def start(self, host_mode: str, **settings: object) -> tuple[ThreadingHTTPServer, int]:
+        app = server.GhisServer(self.server_args(host_mode, **settings))
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(app))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         self.addCleanup(httpd.server_close)
@@ -451,6 +460,50 @@ class ServerTests(Isolated):
             403,
         )
 
+    def test_public_url_decides_same_origin_behind_a_proxy(self) -> None:
+        _, port = self.start("0.0.0.0", public_url="https://Stories.example.com/")
+        story = json.dumps(demo.make_demo(2, "github")).encode()
+        # A proxy that rewrites Host to its upstream name: the public URL still matches.
+        proxied = {**self.JSON, "Host": "ghis:8080"}
+        for origin, expected in (
+            ("https://stories.example.com", 201),
+            ("http://stories.example.com", 403),  # same name, other scheme
+            ("https://stories.example.com.evil.example", 403),
+            ("https://evil.example", 403),
+        ):
+            with self.subTest(origin=origin):
+                status = self.request(
+                    port, "POST", "/api/upload", story, {**proxied, "Origin": origin}
+                )[0]
+                self.assertEqual(status, expected)
+
+    def test_form_defaults_reach_the_page(self) -> None:
+        _, port = self.start(
+            "0.0.0.0",
+            allowed_hosts="gitlab.example.com",
+            default_provider="gitlab",
+            default_url="https://gitlab.example.com/",
+        )
+        config = self.request(port, "GET", "/api/config")[1]
+        self.assertEqual(
+            config["defaults"], {"provider": "gitlab", "url": "https://gitlab.example.com"}
+        )
+
+    def test_bad_settings_stop_the_server_with_a_reason(self) -> None:
+        for settings, reason in (
+            ({"public_url": "stories.example.com"}, "public URL"),
+            ({"default_provider": "svn"}, "Unknown default provider"),
+            ({"default_url": "https://gitlab.example.com"}, "needs a default provider"),
+            ({"default_provider": "git", "default_url": "https://a.example"}, "needs a default"),
+            (
+                {"default_provider": "gitlab", "default_url": "https://gitlab.example.com"},
+                "not in the allowed hosts",
+            ),
+        ):
+            with self.subTest(settings=settings):
+                with self.assertRaisesRegex(common.CollectError, reason):
+                    server.GhisServer(self.server_args("0.0.0.0", **settings))
+
     def test_hosted_job_refuses_unlisted_host(self) -> None:
         _, port = self.start("0.0.0.0")
         body = json.dumps(
@@ -484,18 +537,7 @@ class ServerTests(Isolated):
         subprocess.run(["git", "config", "--global", "user.name", "Someone"], check=True)
         self.addCleanup(lambda: (self.root / ".gitconfig").unlink(missing_ok=True))
         make_repo(self.root / "code", "app")
-        args = argparse.Namespace(
-            host="127.0.0.1",
-            port=0,
-            allowed_hosts=None,
-            max_jobs=1,
-            ttl=5,
-            jobs=1,
-            workdir=str(self.root),
-            max_stories=3,
-            git_timeout=60,
-        )
-        app = server.GhisServer(args)
+        app = server.GhisServer(self.server_args("127.0.0.1"))
         options = argparse.Namespace(
             email=["extra@example.com"],
             exclude_email=["them@example.com"],
@@ -521,10 +563,6 @@ class ServerTests(Isolated):
         # Look-alikes that DNS could point anywhere stay out.
         for name in ("localhost.attacker.example", "ghislocalhost:8080", "evil.example"):
             self.assertEqual(self.request(port, "GET", "/api/config", None, {"Host": name})[0], 403)
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class CliTests(Isolated):
@@ -591,3 +629,42 @@ class CliTests(Isolated):
         self.assertEqual(result.returncode, 1)
         self.assertIn("Nothing to read from", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
+
+
+class CaFileTests(unittest.TestCase):
+    PEM = "-----BEGIN CERTIFICATE-----\nTUlJQ0lUWQ==\n-----END CERTIFICATE-----\n"
+
+    def setUp(self) -> None:
+        self.dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        # trust_ca_file points the whole process at its bundle; undo that after each test.
+        environment = mock.patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        self.addCleanup(setattr, common, "EXTRA_CA", None)
+
+    def test_extra_ca_is_added_to_the_system_ones(self) -> None:
+        system = self.dir / "system.pem"
+        system.write_text(self.PEM.replace("TUlJQ0lUWQ==", "U1lTVEVN"), encoding="ascii")
+        extra = self.dir / "company.pem"
+        extra.write_text(self.PEM, encoding="ascii")
+        os.environ["SSL_CERT_FILE"] = str(system)
+        bundle = common.trust_ca_file(str(extra))
+        self.addCleanup(bundle.unlink)
+        text = bundle.read_text(encoding="utf-8")
+        self.assertIn("U1lTVEVN", text)  # the system's certificates are kept...
+        self.assertIn("TUlJQ0lUWQ==", text)  # ...and the company's added
+        self.assertEqual(os.environ["GIT_SSL_CAINFO"], str(bundle))  # for git
+        self.assertEqual(common.EXTRA_CA, extra)  # for API calls, on top of the system's
+
+    def test_a_file_without_certificates_is_refused(self) -> None:
+        wrong = self.dir / "key.txt"
+        wrong.write_text("not a certificate", encoding="ascii")
+        with self.assertRaisesRegex(common.CollectError, "no PEM certificate"):
+            common.trust_ca_file(str(wrong))
+        with self.assertRaisesRegex(common.CollectError, "Cannot read"):
+            common.trust_ca_file(str(self.dir / "missing.pem"))
+
+
+if __name__ == "__main__":
+    unittest.main()
