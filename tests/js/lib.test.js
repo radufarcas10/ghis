@@ -29,6 +29,21 @@ test('numbers, plurals and durations read naturally', () => {
 	assert.equal(lib.duration(30 * 60e3), '30 min');
 	assert.equal(lib.duration(5 * 3600e3), '5.0 h');
 	assert.equal(lib.duration(3 * 86400e3), '3.0 days');
+});
+
+test('build times read naturally, and the stopwatch ticks like one', () => {
+	assert.equal(lib.buildTime(0.4), 'under a second'); // never "0 s"
+	assert.equal(lib.buildTime(1), '1 s');
+	assert.equal(lib.buildTime(45.4), '45 s');
+	assert.equal(lib.buildTime(72), '1 min 12 s');
+	assert.equal(lib.buildTime(120), '2 min');
+	assert.equal(lib.buildTime(14 * 60 + 20), '14 min'); // seconds are noise on a long wait
+	assert.equal(lib.buildTime(3600 + 3 * 60), '1 h 3 min');
+	assert.equal(lib.buildTime(7200), '2 h');
+	assert.equal(lib.clock(0), '0:00');
+	assert.equal(lib.clock(7.9), '0:07'); // a stopwatch never rounds up
+	assert.equal(lib.clock(12 * 60 + 45), '12:45');
+	assert.equal(lib.clock(3723), '1:02:03');
 	assert.equal(lib.median([5, 1, 3]), 3);
 	assert.equal(lib.median([4, 1, 3, 2]), 2.5);
 	assert.equal(lib.median([]), null);

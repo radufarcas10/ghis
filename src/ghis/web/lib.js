@@ -42,6 +42,29 @@
 		return `${days < 10 ? days.toFixed(1) : Math.round(days)} days`;
 	}
 
+	// How long a story took to build: "45 s", "1 min 12 s", "14 min", "1 h 3 min". Seconds
+	// matter while the wait is short and are noise once it is long.
+	function buildTime(seconds) {
+		const s = Math.max(0, Math.round(seconds));
+		if (s === 0) return 'under a second';
+		if (s < 60) return `${s} s`;
+		const minutes = Math.floor(s / 60);
+		if (s < 600) return s % 60 ? `${minutes} min ${s % 60} s` : `${minutes} min`;
+		if (s < 3600) return `${Math.round(s / 60)} min`;
+		const hours = Math.floor(s / 3600);
+		const rest = Math.round((s % 3600) / 60);
+		return rest ? `${hours} h ${rest} min` : `${hours} h`;
+	}
+
+	// A running stopwatch: "0:07", "12:45", "1:02:03".
+	function clock(seconds) {
+		const s = Math.max(0, Math.floor(seconds));
+		const pad = (n) => String(n).padStart(2, '0');
+		const h = Math.floor(s / 3600);
+		const m = Math.floor((s % 3600) / 60);
+		return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+	}
+
 	function median(values) {
 		if (!values.length) return null;
 		const sorted = [...values].sort((a, b) => a - b);
@@ -482,7 +505,7 @@
 
 	return {
 		esc, safeUrl, num, pct, plural, utc, fmtDay, monthFmt, monthShort, addDays, daysBetween,
-		weekdayOf, WEEKDAYS, WEEKDAYS_LONG, hourLabel, clamp, duration, median, initials,
+		weekdayOf, WEEKDAYS, WEEKDAYS_LONG, hourLabel, clamp, duration, buildTime, clock, median, initials,
 		vocabulary, actionLabels, contributionCount, STOPWORDS, createModel, persona, niceTicks, columnPath,
 		offsetOf, localizeActivity, delta, anonymize, SITE_URL, reviewSeason,
 	};

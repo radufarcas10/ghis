@@ -49,6 +49,11 @@ def log(message: str) -> None:
         print(f"[ghis] {message}", file=sys.stderr, flush=True)
 
 
+def count(n: int, one: str, many: str | None = None) -> str:
+    """ "1 repository", "4 repositories": a number with its noun, for progress lines."""
+    return f"{n} {one if n == 1 else many or one + 's'}"
+
+
 def die(message: str) -> None:
     raise CollectError(message)
 

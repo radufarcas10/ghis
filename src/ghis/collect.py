@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextlib
 import os
 import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 from .api import ApiError
-from .common import SCHEMA_VERSION, die, host_allowed, log, same_host
+from .common import SCHEMA_VERSION, count, die, host_allowed, log, same_host
 from .detect import discover_cached
 from .git import (
     DEFAULT_IGNORE,
@@ -28,6 +30,7 @@ from .git import (
     parse_remote,
     remove_tree,
     scan_repo,
+    stop_all,
     sync_clone,
 )
 from .providers import COLLECTORS, PROVIDERS
@@ -63,6 +66,8 @@ def project_from_url(url: str) -> dict[str, Any]:
 
 
 CLONES_PREFIX = "ghis-clones-"
+# Temporary clone folders in use right now, for abandon_all.
+_active: set[Path] = set()
 
 
 def collect(args: argparse.Namespace, provider: str, token: str | None) -> dict[str, Any]:
@@ -72,18 +77,51 @@ def collect(args: argparse.Namespace, provider: str, token: str | None) -> dict[
     Clones go to a temporary folder that is deleted afterwards, whatever happens, unless
     `args.cache` names a folder to keep them in (--keep-clones), where the next run only
     fetches what changed."""
+    started = time.monotonic()
+    data = _collect_in_temp(args, provider, token)
+    # How long the story took to build, for the story page. The server replaces it with the
+    # time since you clicked, which also counts waiting for a free worker.
+    data["source"]["buildSeconds"] = round(time.monotonic() - started)
+    return data
+
+
+def _collect_in_temp(args: argparse.Namespace, provider: str, token: str | None) -> dict[str, Any]:
     if args.cache or args.no_clone:
         return _collect(args, provider, token)
     base = getattr(args, "workdir", None) or tempfile.gettempdir()
     sweep_stale_clones(Path(base))
     clones = Path(tempfile.mkdtemp(prefix=CLONES_PREFIX, dir=base))
+    _active.add(clones)
     try:
         return _collect(argparse.Namespace(**{**vars(args), "cache": str(clones)}), provider, token)
     finally:
+        _active.discard(clones)
         try:
             remove_tree(clones)
         except OSError:
             pass  # a file still locked (Windows); the next run sweeps it
+
+
+def abandon_all() -> None:
+    """ghis is stopping: stop its downloads and delete their temporary folders now. A job
+    in a background thread never reaches its own clean-up when the process exits."""
+    stop_all()
+    for folder in list(_active):
+        try:
+            remove_tree(folder)
+        except OSError:
+            pass  # still locked (Windows); the next run sweeps it
+
+
+@contextlib.contextmanager
+def _stop_git_when_interrupted() -> Iterator[None]:
+    """Listed after a thread pool in one `with`, so it runs first on the way out: a pool
+    waits for its threads, and on Ctrl+C they must not first finish their downloads."""
+    try:
+        yield
+    except (KeyboardInterrupt, SystemExit):
+        stop_all()
+        raise
 
 
 def sweep_stale_clones(base: Path, age: float = 24 * 3600) -> None:
@@ -157,7 +195,7 @@ def _collect(args: argparse.Namespace, provider: str, token: str | None) -> dict
     if args.local_root:
         log("Looking for local checkouts...")
         local = discover_cached(args.local_root, args.depth)
-        log(f"  {len(local)} repositories")
+        log(f"  {count(len(local), 'repository', 'repositories')}")
         # A story for one host only uses checkouts of that host: a GitLab story must not
         # quietly include the GitHub repositories that happen to sit in the same folder.
         only_host = getattr(args, "only_host", None) or (
@@ -258,17 +296,17 @@ def _collect(args: argparse.Namespace, provider: str, token: str | None) -> dict
     # Downloads mostly wait on the network, so twice as many run at once as reads.
     reads: dict[str, concurrent.futures.Future[Found]] = {}
     clones: dict[str, str] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as readers:
+    readers = concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs)
+    with readers, _stop_git_when_interrupted():
         for key, path in targets:  # local checkouts: nothing to download
             reads[key] = readers.submit(scan, path, None)
         if to_clone:
             cache = Path(args.cache).expanduser().resolve()
             cache.mkdir(parents=True, exist_ok=True)
-            log(
-                f"Downloading {len(to_clone)} repositories: only what your commits need, "
-                "read as each one arrives..."
-            )
-            with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs * 2) as downloads:
+            many = count(len(to_clone), "repository", "repositories")
+            log(f"Downloading {many}: only what your commits need, read as each one arrives...")
+            downloads = concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs * 2)
+            with downloads, _stop_git_when_interrupted():
                 started = {downloads.submit(sync, p): k for k, p in to_clone}
                 for done, future in enumerate(concurrent.futures.as_completed(started), 1):
                     key = started[future]
@@ -283,7 +321,7 @@ def _collect(args: argparse.Namespace, provider: str, token: str | None) -> dict
                         warnings.append(f"Could not clone {name}: {how}")
                         skipped.append({"path": name, "reason": f"could not be cloned: {how}"})
                         log(f"  [{done}/{len(to_clone)}] {name} FAILED: {how}")
-        log(f"Reading commits from {len(reads)} repositories...")
+        log(f"Reading commits from {count(len(reads), 'repository', 'repositories')}...")
     cloned = len(clones)
     # Local checkouts first, then clones in the order the host listed them: the same order
     # every run, so a change found in two repositories is always credited to the same one.
@@ -316,7 +354,8 @@ def _collect(args: argparse.Namespace, provider: str, token: str | None) -> dict
         if key in index:
             commits.extend({**c, "h": c["h"][:12], "r": index[key]} for c in found)
     commits.sort(key=lambda c: datetime.fromisoformat(c["t"]))
-    log(f"  {len(commits)} commits across {sum(1 for k in kept if per_project.get(k))} repos")
+    across = count(sum(1 for k in kept if per_project.get(k)), "repository", "repositories")
+    log(f"  {count(len(commits), 'commit')} across {across}")
 
     generated = datetime.now(timezone.utc).isoformat(timespec="seconds")
     # What the story covers, for the page's "What this story covers" section: how each

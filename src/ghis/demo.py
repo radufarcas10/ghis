@@ -162,6 +162,7 @@ def make_demo(seed: int, provider: str) -> dict[str, Any]:
         "schema": SCHEMA_VERSION,
         "generatedAt": now.isoformat(timespec="seconds"),
         "source": {
+            "buildSeconds": 74,
             "provider": provider,
             "label": PROVIDERS[provider]["label"],
             "host": DEMO_HOSTS[provider],

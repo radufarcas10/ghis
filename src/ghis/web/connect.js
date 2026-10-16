@@ -4,6 +4,7 @@
 	'use strict';
 
 	const $ = (selector) => document.querySelector(selector);
+	const { buildTime, clock } = window.GhisLib;
 	const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({
 		'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 	}[c]));
@@ -292,7 +293,7 @@
 	function follow(id) {
 		const panel = $('#panel');
 		panel.innerHTML = `<div class="progress" aria-live="polite">
-			<div class="orb" aria-hidden="true"><i></i><i></i><i></i></div>
+			<div class="orb" aria-hidden="true"><i></i><i></i><i></i><span class="timer" id="timer">0:00</span></div>
 			<h2>Reading your history</h2>
 			<p class="status" id="status">Connecting…</p>
 			<ol class="log" id="log"></ol>
@@ -300,6 +301,15 @@
 		panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
 		let since = 0;
 		const started = Date.now();
+		// The elapsed time, ticking in the middle of the rings. Hidden from screen readers:
+		// the region is live, and a number changing every second would be read out each time.
+		const elapsed = () => (Date.now() - started) / 1000;
+		const tick = () => {
+			const shown = clock(elapsed());
+			$('#timer').textContent = shown;
+			$('#timer').classList.toggle('long', shown.length > 5); // past an hour: 1:02:03
+		};
+		const ticking = setInterval(tick, 1000);
 
 		const poll = async () => {
 			let state;
@@ -321,8 +331,14 @@
 			const last = log.lastElementChild?.textContent?.trim();
 			if (last) $('#status').textContent = last;
 			if (state.status === 'done') {
-				$('#status').textContent = `Done in ${Math.round((Date.now() - started) / 1000)} s. Opening your story…`;
-				setTimeout(() => { location.href = `story?job=${encodeURIComponent(id)}`; }, 600);
+				clearInterval(ticking);
+				// The server's own count, the one the story shows, so the two always agree.
+				const seconds = typeof state.seconds === 'number' ? state.seconds : Math.round(elapsed());
+				$('#timer').textContent = clock(seconds);
+				panel.querySelector('.orb').classList.add('done');
+				panel.querySelector('h2').textContent = 'Your story is ready';
+				$('#status').textContent = `Created in ${buildTime(seconds)}. Opening it…`;
+				setTimeout(() => { location.href = `story?job=${encodeURIComponent(id)}`; }, 1400);
 			} else if (state.status === 'failed') {
 				fail(state.error);
 			} else {
@@ -331,9 +347,10 @@
 		};
 
 		const fail = (message) => {
+			clearInterval(ticking);
 			panel.querySelector('.orb')?.remove();
 			panel.querySelector('h2').textContent = 'That did not work';
-			$('#status').innerHTML = `${esc(message)}<br><br><button class="btn" type="button" id="retry">Try again</button>`;
+			$('#status').innerHTML = `${esc(message)}<br><span class="after">Stopped after ${buildTime(elapsed())}.</span><br><br><button class="btn" type="button" id="retry">Try again</button>`;
 			$('#retry').addEventListener('click', () => { location.reload(); });
 		};
 

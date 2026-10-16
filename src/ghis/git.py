@@ -7,9 +7,11 @@ import fnmatch
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -144,29 +146,96 @@ class GitError(Exception):
 
 
 # Seconds any single git command may run; a hosted server sets it, the CLI leaves it off.
-GIT_TIMEOUT: float | None = None
+# Seconds any one git command may take: an hour on your own computer, where a stalled
+# download must still end eventually; GHIS_GIT_TIMEOUT when hosted (server.py).
+GIT_TIMEOUT: float | None = 3600
 
 
 MIN_GIT = (2, 31)  # GIT_CONFIG_COUNT, used to pass the clone token, arrived in 2.31
 
 
+# Every git command still running, so stopping ghis can stop them too: otherwise a clone
+# carries on alone after ghis exits, filling the temporary folder nobody will delete.
+_running: set[subprocess.Popen[bytes]] = set()
+_running_lock = threading.Lock()
+# Set once ghis is stopping: no new git command may start, or a download stopped halfway
+# would be retried another way (sync_clone's fallbacks) instead of ending.
+_stopping = threading.Event()
+
+
 def git(args: list[str], env: dict[str, str] | None = None, stdin: str | None = None) -> str:
     # Bytes in both directions: a text-mode pipe on Windows turns each \n written to git
     # into \r\n, and git then rejects every object id sent on stdin ("invalid refspec").
+    if _stopping.is_set():
+        raise GitError("ghis is stopping")
+    proc = subprocess.Popen(
+        ["git", *args],
+        env=env,
+        stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        # Its own process group, so stopping it reaches the helpers it starts too (see _kill).
+        **_GROUP,
+    )
+    with _running_lock:
+        _running.add(proc)
     try:
-        proc = subprocess.run(
-            ["git", *args],
-            env=env,
-            input=stdin.encode("utf-8") if stdin is not None else None,
-            capture_output=True,
-            timeout=GIT_TIMEOUT,
+        out, err = proc.communicate(
+            stdin.encode("utf-8") if stdin is not None else None, timeout=GIT_TIMEOUT
         )
     except subprocess.TimeoutExpired:
+        _kill(proc)
+        proc.communicate()
         raise GitError(f"git took longer than {GIT_TIMEOUT:.0f}s and was stopped") from None
+    except BaseException:  # Ctrl+C, or anything else: never leave git running behind
+        _kill(proc)
+        proc.communicate()
+        raise
+    finally:
+        with _running_lock:
+            _running.discard(proc)
     if proc.returncode != 0:
-        lines = _text(proc.stderr).strip().splitlines()
+        lines = _text(err).strip().splitlines()
         raise GitError(lines[-1] if lines else f"git {args[0]} exited {proc.returncode}")
-    return _text(proc.stdout)
+    return _text(out)
+
+
+def stop_all() -> None:
+    """Stop every git command ghis started, and any it would start next; each caller gets
+    a GitError."""
+    _stopping.set()
+    with _running_lock:
+        running = list(_running)
+    for proc in running:
+        _kill(proc)
+
+
+_GROUP: dict[str, Any] = (
+    {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    if sys.platform == "win32"
+    else {"start_new_session": True}
+)
+
+
+def _kill(proc: subprocess.Popen[bytes]) -> None:
+    """Stop a git command and every helper it started. Killing git alone is not enough:
+    `git clone` over https runs git-remote-https, which holds the same output pipes and
+    keeps waiting on the host, so reading git's output would wait on it forever."""
+    try:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True,
+                timeout=10,
+            )
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)  # the group start_new_session made
+    except (OSError, subprocess.SubprocessError):
+        pass  # already gone
+    try:
+        proc.kill()  # in case the group could not be reached
+    except OSError:
+        pass
 
 
 def _text(raw: bytes) -> str:
@@ -226,7 +295,12 @@ def discover_local(roots: list[str], max_depth: int) -> list[dict[str, Any]]:
 
 def clone_env(token: str | None, clone_user: str, restricted: bool) -> dict[str, str]:
     env = dict(os.environ)
+    # Never wait for a password nobody can type: no terminal prompt, no credential-manager
+    # window, no askpass helper. A missing credential fails at once instead.
     env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GCM_INTERACTIVE"] = "never"
+    env["GIT_ASKPASS"] = ""
+    env["SSH_ASKPASS"] = ""
     env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
     config: list[tuple[str, str]] = []
     if token:
@@ -322,7 +396,7 @@ def sync_clone(
             git(["clone", "--bare", "--quiet", *flags, url, str(building)], env=env)
             if not strategy or not is_partial(building):
                 how = "full clone"  # asked for one, or the host ignored the filter
-            elif strategy == "tree:0" and share_needed(building, emails) > TARGETED_SHARE:
+            elif strategy == "tree:0" and share_needed(building, emails, env) > TARGETED_SHARE:
                 continue  # mostly your history: all folder listings at once is cheaper
             else:
                 fetch_your_files(building, emails, env)
@@ -355,22 +429,22 @@ def config_value(repo: Path, key: str) -> str:
         return ""  # not set
 
 
-def your_commits(repo: Path, emails: list[str]) -> dict[str, list[str]]:
+def your_commits(repo: Path, emails: list[str], env: dict[str, str] | None) -> dict[str, list[str]]:
     """Your commits (authored, or naming you in the message) mapped to their parents.
     Needs commits only, so it works on a commits-only clone."""
     found: dict[str, list[str]] = {}
     for filters in mine_filters(emails):
-        for line in _git_log(str(repo), ["--format=%H %P"], filters).splitlines():
+        for line in _git_log(str(repo), ["--format=%H %P"], filters, env).splitlines():
             commit, *parents = line.split()
             found[commit] = parents
     return found
 
 
-def share_needed(repo: Path, emails: list[str]) -> float:
+def share_needed(repo: Path, emails: list[str], env: dict[str, str] | None) -> float:
     """The share of all commits whose snapshots reading your commits needs: yours, and
     the ones just before each of them."""
-    total = int(git(["-C", str(repo), "rev-list", "--all", "--count"]).strip() or 0)
-    mine = your_commits(repo, emails)
+    total = int(git(["-C", str(repo), "rev-list", "--all", "--count"], env=env).strip() or 0)
+    mine = your_commits(repo, emails, env)
     needed = set(mine) | {p for parents in mine.values() for p in parents}
     return len(needed) / total if total else 0.0
 
@@ -387,12 +461,21 @@ def fetch_your_files(repo: Path, emails: list[str], env: dict[str, str] | None) 
     record = repo / FETCHED_LIST
     fetched = set(record.read_text(encoding="ascii").split()) if record.is_file() else set()
     if config_value(repo, "remote.origin.partialclonefilter") == "tree:0":
-        mine = your_commits(repo, emails)
+        mine = your_commits(repo, emails, env)
         commits = set(mine) | {p for parents in mine.values() for p in parents}
         roots = (
             set(
                 git(
-                    ["-C", str(repo), "log", "--no-walk=unsorted", "--format=%T", "--stdin"],
+                    [
+                        "-C",
+                        str(repo),
+                        "log",
+                        "--no-mailmap",
+                        "--no-walk=unsorted",
+                        "--format=%T",
+                        "--stdin",
+                    ],
+                    env=env,
                     stdin="\n".join(sorted(commits)) + "\n",
                 ).split()
             )
@@ -404,7 +487,9 @@ def fetch_your_files(repo: Path, emails: list[str], env: dict[str, str] | None) 
         fetched |= roots
     wanted: set[str] = set()
     for filters in mine_filters(emails):
-        out = _git_log(str(repo), ["--no-renames", "--raw", "--no-abbrev", "--format="], filters)
+        out = _git_log(
+            str(repo), ["--no-renames", "--raw", "--no-abbrev", "--format="], filters, env
+        )
         for line in out.splitlines():
             if not line.startswith(":"):
                 continue
@@ -478,6 +563,10 @@ def _git_log(
             "-c",
             "core.quotePath=false",
             "log",
+            # Your exact emails, as --author matches them. And a bare clone would otherwise
+            # read .mailmap from its newest commit, which a partial clone hasn't downloaded:
+            # git would go and fetch it in the middle of reading.
+            "--no-mailmap",
             "--exclude=refs/stash",
             "--exclude=refs/notes/*",
             "--all",

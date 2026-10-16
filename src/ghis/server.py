@@ -25,7 +25,7 @@ from typing import Any
 
 from . import git as gitmod
 from .assets import version_refs
-from .collect import collect
+from .collect import abandon_all, collect
 from .common import (
     DATA_DIR,
     SCHEMA_VERSION,
@@ -79,6 +79,8 @@ class Job:
         self.error: str | None = None
         self.result: bytes | None = None
         self.finished: float | None = None
+        self.created = time.monotonic()  # when the form was sent: the build time counts from here
+        self.seconds: int | None = None  # the build time, once done
         self.lock = threading.Lock()
 
     def progress(self, message: str) -> None:
@@ -97,6 +99,8 @@ class Job:
                 "lines": self.lines[since:],
                 "next": len(self.lines),
                 "error": self.error,
+                # The page's timer ends on this, so it agrees with the story to the second.
+                "seconds": self.seconds,
             }
 
 
@@ -326,6 +330,8 @@ class GhisServer:
                     host=options.only_host,
                     has=[],
                 )
+            # The time you waited, queue included: what the progress view's timer showed.
+            job.seconds = data["source"]["buildSeconds"] = round(time.monotonic() - job.created)
             if self.personal:
                 write_site(data, DATA_DIR / "out", False)  # logs where the copy went
             job.finish("done", json.dumps(data, separators=(",", ":")).encode())
@@ -635,4 +641,5 @@ def serve(args: argparse.Namespace) -> None:
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
+        abandon_all()  # downloads in progress, and their temporary folders
         log("Stopped.")

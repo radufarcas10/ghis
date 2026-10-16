@@ -102,12 +102,14 @@ class BrowserTests(unittest.TestCase):
         self.assertIn("Ada Example", dom)
         self.assertIn("MRs merged", dom)  # GitLab vocabulary
         self.assertIn('class="pill"', dom)  # the year filter
+        self.assertIn("in 1 min 14 s", dom)  # how long it took to build
 
     def test_hostile_data_is_inert(self) -> None:
         data = demo.make_demo(4, "github")
         data["commits"][-1]["s"] = '<img src=x onerror="document.title=1">'
         data["projects"][0]["webUrl"] = "javascript:alert(1)"
         data["requests"][0]["url"] = "javascript:alert(2)"
+        data["source"]["buildSeconds"] = '<img src=x onerror="document.title=2">'  # not a number
         site.write_site(data, self.tmp, False)
         dom = render((self.tmp / "index.html").as_uri())
         self.assert_story(dom)

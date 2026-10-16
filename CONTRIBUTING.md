@@ -77,7 +77,7 @@ and `reviewers` below) keep the number. The page reads older files without them.
 | `commits[]` | `h` id, `t` author time with its UTC offset, `e` author email, `a`/`d` lines added and removed, `f` files, `s` subject, `m` 1 for a merge, `l` lines per language, `r` index into `projects`, `co` 1 when you are a co-author |
 | `requests[]`, `reviews[]` | pull/merge requests you opened / reviewed: `project`, `title`, `state`, `createdAt`, `mergedAt`, `author`, `reviewers`, `url` |
 | `activity` | event counts by UTC hour (`"2024-03-01T09": {"commented": 2}`). The page moves each hour into the author's timezone. Older files use days |
-| `source` | provider, host, what the API provided (`has`), emails matched, and `shareSafe` on an anonymized copy |
+| `source` | provider, host, what the API provided (`has`), emails matched, `buildSeconds` (how long the story took to build, from the click when made in the app), and `shareSafe` on an anonymized copy |
 
 Bulk detection, streaks, comparisons, milestones and the share card are all computed in the
 page (`web/lib.js`, `web/app.js`). The file keeps raw facts only.

@@ -11,7 +11,7 @@
 
 	const {
 		esc, safeUrl, num, pct, plural, utc, fmtDay, monthFmt, monthShort, addDays, daysBetween,
-		weekdayOf, WEEKDAYS, WEEKDAYS_LONG, hourLabel, clamp, duration, median, initials,
+		weekdayOf, WEEKDAYS, WEEKDAYS_LONG, hourLabel, clamp, duration, buildTime, median, initials,
 		vocabulary, actionLabels, createModel, persona, niceTicks, columnPath, delta, anonymize, SITE_URL,
 		reviewSeason,
 	} = window.GhisLib;
@@ -591,7 +591,8 @@
 			...(cov.excludedEmails || []).map((e) => `Left out at your request: <b>${esc(e)}</b>.`),
 		];
 		const withCommits = repos.filter((r) => r.commits).length;
-		const scanned = cov.scanned ? `ghis read ${plural(cov.scanned, 'repository', 'repositories')}; ${num(withCommits)} of them had commits of yours.` : '';
+		const built = builtIn();
+		const scanned = cov.scanned ? `ghis read ${plural(cov.scanned, 'repository', 'repositories')}${built ? ` in ${built}` : ''}; ${num(withCommits)} of them had commits of yours.` : '';
 		return section('coverage', 'Coverage', 'What this story covers', scanned,
 			`${disclaimer}
 			<div class="coverage">
@@ -631,6 +632,12 @@
 			`<div class="words">${words}</div>`);
 	}
 
+	// How long the story took to build, when the file says (older files and uploads may not).
+	function builtIn() {
+		const seconds = D.source?.buildSeconds;
+		return typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0 ? buildTime(seconds) : '';
+	}
+
 	function footer() {
 		const src = D.source || {};
 		const parts = [];
@@ -640,13 +647,14 @@
 			if (src.clonedRepos) parts.push(plural(src.clonedRepos, 'cloned repository', 'cloned repositories'));
 			if (src.localRepos) parts.push(plural(src.localRepos, 'local checkout'));
 		}
+		const built = builtIn();
 		const warnings = D.warnings || [];
 		const actions = [];
 		if (hosted && query.get('job')) actions.push(`<a class="btn small" href="api/jobs/${encodeURIComponent(query.get('job'))}/result?download=1">Download history.json</a>`);
 		if (hosted) actions.push('<a class="btn small" href="./">Make another story</a>');
 
 		return `<footer class="foot">
-			<p>Built by ghis on ${fmtDay(generatedDay)} from ${parts.join(', ') || 'git'}.
+			<p>Built by ghis on ${fmtDay(generatedDay)}${built ? ` in ${built}` : ''} from ${parts.join(', ') || 'git'}.
 			${src.emails?.length ? `Commits matched by ${esc(src.emails.join(', '))}.` : ''}
 			${src.shareSafe ? `This is a share-safe copy${src.shareSafe.names ? ': repositories and teammates are renamed' : ''}${src.shareSafe.messages ? `${src.shareSafe.names ? ' and' : ':'} messages are removed` : ''}.` : ''}</p>
 			${warnings.length ? `<details><summary>${plural(warnings.length, 'note')} about this data</summary><ul>${warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}

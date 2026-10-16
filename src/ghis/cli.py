@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .collect import collect, pick_provider, read_token
+from .collect import abandon_all, collect, pick_provider, read_token
 from .common import DATA_DIR, CollectError, die, log, tilde, trust_ca_file
 from .demo import make_demo
 from .detect import find_token
@@ -260,3 +260,7 @@ def main() -> None:
     except CollectError as err:
         log(str(err))
         sys.exit(1)
+    except KeyboardInterrupt:
+        abandon_all()  # downloads still running, and their temporary folders
+        log("Stopped.")
+        sys.exit(130)

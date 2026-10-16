@@ -105,6 +105,29 @@ class Isolated(unittest.TestCase):
 
 
 class HelperTests(unittest.TestCase):
+    def test_stop_all_ends_running_git_commands(self) -> None:
+        outcome: list[BaseException] = []
+
+        def nap() -> None:
+            try:
+                git.git(["-c", "alias.nap=!sleep 30", "nap"])
+            except git.GitError as err:
+                outcome.append(err)
+
+        worker = threading.Thread(target=nap)
+        self.addCleanup(git._stopping.clear)  # the rest of the suite still runs git
+        worker.start()
+        for _ in range(100):
+            if git._running:
+                break
+            time.sleep(0.05)
+        git.stop_all()
+        worker.join(10)
+        self.assertFalse(worker.is_alive(), "git kept running after stop_all")
+        self.assertEqual(len(outcome), 1)  # the caller hears about it as a failure
+        with self.assertRaisesRegex(git.GitError, "stopping"):  # and nothing new starts
+            git.git(["--version"])
+
     def test_git_receives_stdin_byte_for_byte(self) -> None:
         # A text-mode pipe on Windows sends \n as \r\n, and git then rejects every object id
         # ghis sends it. git hashes exactly what it receives, so the id shows any change.
@@ -289,6 +312,8 @@ class CollectTests(Isolated):
         run = lambda *a: subprocess.run(["git", "-C", str(source), *a], check=True)  # noqa: E731
         for i in range(others):
             (source / f"theirs_{i}.js").write_text(f"{i}\n", encoding="utf-8")
+            if i == others - 1:  # git log reads this from the newest commit of a bare clone
+                (source / ".mailmap").write_text("Me <me@example.com>\n", encoding="utf-8")
             run("add", "-A")
             run(
                 "-c",
@@ -308,11 +333,13 @@ class CollectTests(Isolated):
             run("config", key, value)
         return source
 
-    def missing(self, clone: Path) -> set[str]:
-        """Objects the clone does not have. --missing=print lists them without fetching,
-        which any other read of a missing object would do by itself."""
-        listing = ["-C", str(clone), "rev-list", "--objects", "--all", "--missing=print"]
-        return {line[1:] for line in git.git(listing).split() if line.startswith("?")}
+    def has(self, clone: Path, source: Path, spec: str) -> bool:
+        """Whether the clone holds the object `spec` names in the source. Read from the list
+        of objects actually on disk: any ordinary read of a missing object would go and
+        fetch it, and so answer yes."""
+        oid = git.git(["-C", str(source), "rev-parse", spec]).strip()
+        listing = ["cat-file", "--batch-all-objects", "--batch-check=%(objectname)"]
+        return oid in git.git(["-C", str(clone), *listing]).split()
 
     def test_commits_only_clone_downloads_only_what_your_commits_need(self) -> None:
         # Your 4 commits among 85: their snapshots are a small share, so commits only it is.
@@ -320,13 +347,17 @@ class CollectTests(Isolated):
         project = {"path": "team/long", "cloneUrl": source.as_uri()}
         clone, how = git.sync_clone(project, self.root / "c1", "https", None, ["me@example.com"])
         self.assertEqual(how, "commits only")
-        obj = lambda spec: git.git(["-C", str(source), "rev-parse", spec]).strip()  # noqa: E731
-        missing = self.missing(clone)  # checked before reading, which would fill gaps itself
-        self.assertNotIn(obj("HEAD~84:app.py"), missing)  # your first commit's file
-        self.assertNotIn(obj("HEAD~83:src/main.py"), missing)  # your rename
-        self.assertNotIn(obj("HEAD~83^{tree}"), missing)  # the snapshot your commit made
-        self.assertIn(obj("HEAD~5:theirs_74.js"), missing)  # their file
-        self.assertIn(obj("HEAD~5^{tree}"), missing)  # and the snapshot of their commit
+        has = lambda spec: self.has(clone, source, spec)  # noqa: E731
+        # Checked before reading, which would fill any gap by itself.
+        self.assertTrue(has("HEAD~84:app.py"))  # your first commit's file
+        self.assertTrue(has("HEAD~83:src/main.py"))  # your rename
+        self.assertTrue(has("HEAD~83^{tree}"))  # the snapshot your commit made
+        self.assertFalse(has("HEAD~5:theirs_74.js"))  # their file
+        self.assertFalse(has("HEAD~5^{tree}"))  # and the snapshot of their commit
+        # Nothing was fetched behind ghis's back: reading the newest commit's .mailmap would
+        # have pulled in its snapshot, without the token on a real host, and hung there.
+        self.assertFalse(has("HEAD^{tree}"))
+        self.assertFalse(has("HEAD:.mailmap"))
         scan = lambda repo: git.scan_repo(str(repo), ["me@example.com"], ())  # noqa: E731
         self.assertEqual(scan(clone), scan(source))  # exactly what the original gives
 
@@ -336,10 +367,9 @@ class CollectTests(Isolated):
         project = {"path": "team/mine", "cloneUrl": source.as_uri()}
         clone, how = git.sync_clone(project, self.root / "c2", "https", None, ["me@example.com"])
         self.assertEqual(how, "history")
-        obj = lambda spec: git.git(["-C", str(source), "rev-parse", spec]).strip()  # noqa: E731
-        missing = self.missing(clone)
-        self.assertIn(obj("HEAD~2:other.js"), missing)  # their file still stays on the host
-        self.assertNotIn(obj("HEAD~4:app.py"), missing)
+        has = lambda spec: self.has(clone, source, spec)  # noqa: E731
+        self.assertFalse(has("HEAD~2:other.js"))  # their file still stays on the host
+        self.assertTrue(has("HEAD~4:app.py"))
         scan = lambda repo: git.scan_repo(str(repo), ["me@example.com"], ())  # noqa: E731
         self.assertEqual(scan(clone), scan(source))
 
@@ -363,6 +393,7 @@ class CollectTests(Isolated):
 
     def test_collect_local_folders(self) -> None:
         data = collect_mod.collect(collect_args(local_root=[str(self.root / "code")]), "git", None)
+        self.assertIsInstance(data["source"]["buildSeconds"], int)  # shown on the story
         self.assertEqual(data["schema"], common.SCHEMA_VERSION)
         self.assertEqual([p["path"] for p in data["projects"]], ["team/app"])
         self.assertEqual(len(data["commits"]), 3)  # two authored, one co-authored
@@ -621,6 +652,29 @@ class ServerTests(Isolated):
         self.assertEqual(job["status"], "failed")
         self.assertIn("not allowed", job["error"])
 
+    def test_finished_job_reports_its_build_time_to_page_and_story(self) -> None:
+        subprocess.run(["git", "config", "--global", "user.name", "Someone"], check=True)
+        self.addCleanup(lambda: (self.root / ".gitconfig").unlink(missing_ok=True))
+        make_repo(self.root / "timed", "app")
+        patch = mock.patch.object(server, "DATA_DIR", self.root / "timed-data")  # not out/
+        patch.start()
+        self.addCleanup(patch.stop)
+        _, port = self.start("127.0.0.1")
+        body = json.dumps({"provider": "git", "folders": [str(self.root / "timed")]}).encode()
+        status, started = self.request(port, "POST", "/api/jobs", body, self.JSON)
+        self.assertEqual(status, 202)
+        for _ in range(100):
+            job = self.request(port, "GET", f"/api/jobs/{started['id']}")[1]
+            if job["status"] != "running" and job["status"] != "queued":
+                break
+            self.assertIsNone(job["seconds"])  # no time until it is done
+            time.sleep(0.1)
+        self.assertEqual(job["status"], "done", job.get("error"))
+        story = self.request(port, "GET", f"/api/jobs/{started['id']}/result")[1]
+        # The progress view's timer ends on the number the story shows.
+        self.assertIsInstance(job["seconds"], int)
+        self.assertEqual(story["source"]["buildSeconds"], job["seconds"])
+
     def test_upload_validates_and_caps_storage(self) -> None:
         _, port = self.start("0.0.0.0")
         self.assertEqual(self.request(port, "POST", "/api/upload", b'{"x": 1}', self.JSON)[0], 400)
@@ -754,6 +808,37 @@ class CliTests(Isolated):
                     self.fail(f"ghis serve exited: {proc.stdout.read()}")
                 time.sleep(0.1)
         self.fail("ghis serve did not answer")
+
+    @unittest.skipIf(sys.platform == "win32", "Ctrl+C is a console event on Windows, not a signal")
+    def test_ctrl_c_stops_downloads_and_leaves_nothing_behind(self) -> None:
+        import signal
+        import socket
+
+        # A host that accepts the connection and never answers: a clone that would wait
+        # forever, like a stalled download.
+        silent = socket.socket()
+        silent.bind(("127.0.0.1", 0))
+        silent.listen()
+        self.addCleanup(silent.close)
+        temp = self.root / "ctrl-c-temp"
+        temp.mkdir()
+        url = f"http://127.0.0.1:{silent.getsockname()[1]}/team/app.git"
+        args = ["collect", "--provider", "git", "--email", "me@example.com", "--repo", url]
+        proc = subprocess.Popen(
+            [sys.executable, self.LAUNCHER, *args, "--out", str(self.root / "ctrl-c-out")],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env={**os.environ, "GHIS_HOME": str(self.root), "TMPDIR": str(temp)},
+        )
+        self.addCleanup(lambda: proc.poll() is None and proc.kill())
+        for _ in range(100):  # until the clone is underway
+            if any(temp.glob("ghis-clones-*/*.partial")):
+                break
+            time.sleep(0.1)
+        self.assertTrue(any(temp.glob("ghis-clones-*/*.partial")), "the clone never started")
+        proc.send_signal(signal.SIGINT)
+        self.assertEqual(proc.wait(15), 130)  # promptly, not after the download
+        self.assertEqual(list(temp.iterdir()), [])  # and the temporary clone is gone
 
     def test_collect_reports_errors_without_a_traceback(self) -> None:
         result = self.ghis("collect", "--provider", "git")
